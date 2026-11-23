@@ -1,0 +1,7 @@
+# Normalise line endings so files built into Linux containers never get CRLF.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.webp binary
+*.parquet binary
+*.joblib binary

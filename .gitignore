@@ -1,0 +1,39 @@
+# secrets / local config
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+frontend/dist/
+playwright-report/
+test-results/
+
+# data & models (regenerated from seeds; see docs/DATA_PIPELINE.md)
+data/
+models/
+*.parquet
+ml/notebooks/.ipynb_checkpoints/
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# tooling
+.claude/settings.local.json
