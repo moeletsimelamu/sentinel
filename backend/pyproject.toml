@@ -1,0 +1,90 @@
+[project]
+name = "sentinel"
+version = "0.1.0"
+description = "Sentinel — fraud detection and risk analytics platform (educational simulation, synthetic data only)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.165,<0.166",
+    "uvicorn[standard]>=0.54,<0.55",
+    "sqlalchemy>=2.1,<2.2",
+    "psycopg[binary]>=3.3,<3.4",
+    "alembic>=1.20,<1.21",
+    "pydantic>=2.14,<3",
+    "pydantic-settings>=2.16,<3",
+    "structlog>=26.1,<27",
+    "pwdlib[argon2]>=0.4,<0.5",
+    "pyjwt>=2.15,<3",
+    "slowapi>=0.1.10,<0.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2,<10",
+    "pytest-cov>=7,<8",
+    "httpx>=0.28,<0.29",
+    "ruff>=0.17,<0.18",
+    "mypy>=2.4,<3",
+    "import-linter>=2.17,<3",
+]
+
+[project.scripts]
+sentinel = "sentinel.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sentinel"]
+
+# ---------------------------------------------------------------- tooling
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "N", "SIM", "RUF", "PTH", "DTZ", "T20"]
+ignore = [
+    "B008",   # FastAPI Depends() in defaults is idiomatic
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S311"]
+"alembic/**" = ["N999"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+mypy_path = "src"
+packages = ["sentinel"]
+
+[[tool.mypy.overrides]]
+module = ["slowapi.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = ["integration: requires PostgreSQL"]
+
+[tool.coverage.run]
+source = ["sentinel"]
+branch = true
+
+[tool.importlinter]
+root_package = "sentinel"
+
+[[tool.importlinter.contracts]]
+name = "Core infrastructure does not depend on domain modules"
+type = "forbidden"
+source_modules = ["sentinel.core"]
+forbidden_modules = ["sentinel.modules", "sentinel.api"]
+
+[[tool.importlinter.contracts]]
+name = "Domain modules are independent of the HTTP app assembly"
+type = "forbidden"
+source_modules = ["sentinel.modules"]
+forbidden_modules = ["sentinel.main", "sentinel.api"]
