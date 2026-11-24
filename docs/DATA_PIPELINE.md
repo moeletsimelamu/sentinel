@@ -69,16 +69,20 @@ Each episode records `scenario_id` and `typology` in the label file so evaluatio
 
 The CSV used for the ingestion demo also contains a small, deliberate set of malformed rows (bad currency, negative amount, missing timestamp, duplicate id) so validation reporting can be demonstrated.
 
-## 3. Ingestion validation (Phase 3)
+## 3. Ingestion validation (Phase 3 — implemented)
+
+Implemented in `backend/src/sentinel/modules/ingestion/` (pure `validation.py` and `csv_reader.py`, DB-side `pipeline.py`). The exact field rules and every error code are in [DATA_DICTIONARY.md](DATA_DICTIONARY.md). Summary:
 
 | Check | Outcome on failure |
 |---|---|
-| Required columns present | Whole file rejected |
+| Required columns present; no card / credential / personal-data / protected-attribute columns; UTF-8; size and row limits | Whole file rejected |
 | Types parse (Decimal amount, ISO-8601 timestamp with zone) | Row rejected, field-level error |
 | Domain checks (amount > 0, currency in allowed list, enums valid, lat/lon in range, timestamp not in future) | Row rejected |
 | Duplicate within file / against DB (`source_system, external_id`) | Row counted as duplicate, not inserted |
 | Same content, different id (content hash) | Accepted but flagged as *possible duplicate* in the import summary |
 | Unknown customer ref | Customer auto-created (pseudonymous) — documented behaviour |
+| Value looks like a card number (Luhn) | Row rejected, value redacted in the report |
+| Unknown columns (incl. generator labels) | Ignored, listed in the import summary, never stored |
 | Missing optional fields (device, city) | Accepted; stored as null; features treat as explicit "unknown" |
 
 ## 4. Feature engineering (`backend/src/sentinel/features/`)

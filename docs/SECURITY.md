@@ -1,6 +1,6 @@
 # Sentinel — Security
 
-> Status: Phase 2 (backend foundation). Updated as each phase adds attack surface; finalised in Phase 10.
+> Status: Phase 3 (ingestion). Updated as each phase adds attack surface; finalised in Phase 10.
 > Sentinel is an educational simulation using synthetic data. It holds no real customer, card or banking data.
 
 ## Reporting
@@ -28,6 +28,24 @@ This is a portfolio project. Please report security issues privately to the repo
 | Configuration | Secrets from environment only; `.env` git-ignored; app refuses to start in production with default/short JWT secret, default salt or insecure cookies; API docs disabled in production | `core/config.py` |
 | Containers | Multi-stage image, non-root user, no dev dependencies; ports bound to `127.0.0.1` | `backend/Dockerfile`, `docker-compose.yml` |
 
+## Controls implemented (Phase 3 — ingestion)
+
+| Area | Control | Where |
+|---|---|---|
+| Card / personal data | Files with card, bank-credential, personal-data or protected-attribute columns are rejected whole; REST records with such fields are rejected and the values dropped. Text values that look like card numbers (13–19 digits, card prefix, valid Luhn) are rejected | `ingestion/validation.py`, `csv_reader.py` |
+| Rejected-row storage | Only known fields are kept; `device_id` and card-like values are replaced with `[REDACTED]`; values truncated to 256 chars | `validation.redact_raw_row` |
+| Ground-truth isolation | Label columns (`is_fraud`, `typology`, …) are ignored and never stored | `csv_reader.py` |
+| Upload limits | Body read only after the permission check; `Content-Length` checked and the stream counted against `SENTINEL_IMPORT_MAX_BYTES` (413); row, column and cell-size limits; content type allow-list (415) | `ingestion/router.py`, `csv_reader.py` |
+| Parsing | UTF-8 only, NUL bytes rejected, strict CSV quoting, header names normalised | `csv_reader.py` |
+| Data minimisation | Raw uploads are deleted after processing; the batch keeps only the SHA-256. Device ids are stored as keyed hashes | `ingestion/service.py` |
+| Duplicate safety | `UNIQUE (source_system, external_id)` + `ON CONFLICT DO NOTHING` — concurrent imports cannot double-insert | `transactions/service.py` |
+| Immutability | `UPDATE`/`DELETE`/`TRUNCATE` on `transactions` rejected by trigger | migration `0002` |
+| CSV export | Report cells starting with `= + - @` are prefixed with `'` (spreadsheet formula injection) | `ingestion/router.py` |
+| Rate limiting | `POST /imports` and `POST /transactions` limited to 30/min per client | `core/rate_limit.py` |
+| Job errors | Database errors are recorded as exception type + SQLSTATE only, because driver messages can echo row values | `jobs/service.describe_error` |
+| Filenames | Display-only; path components and control characters stripped; never used to touch the filesystem | `ingestion/service.safe_filename` |
+| Audit | `import.uploaded` (user), `import.completed` / `import.rejected` / `import.failed` (system or user) with counts — never row contents | `ingestion/service.py` |
+
 ## Known limitations / planned work
 
 | Item | Plan |
@@ -38,8 +56,11 @@ This is a portfolio project. Please report security issues privately to the repo
 | No MFA | Out of scope for the simulation; documented as a production requirement |
 | Demo accounts share one dev-only password from `.env.example` | Seed command refuses to run when `SENTINEL_ENV=production` |
 | `starlette.testclient` warns that `httpx` support is deprecated in favour of `httpx2` | Test-only dependency; revisit when pinning versions in Phase 10 |
+| JSON request bodies (e.g. `POST /transactions`) have no byte limit in the app; only the record count is limited | Phase 10: request-size limit at a reverse proxy or ASGI middleware |
+| Uploaded files sit in Postgres (`import_files`) until the worker processes them | Acceptable at simulation scale; deleted after processing |
+| Card-number detection can reject purely numeric 13–19-digit ids that happen to pass Luhn | Deliberately conservative; documented in DATA_DICTIONARY.md |
 
 ## Data protection
 
-- No real personal data, card numbers (PAN/CVV) or bank credentials are collected. Ingestion (Phase 3) will reject such fields.
+- No real personal data, card numbers (PAN/CVV) or bank credentials are collected. Ingestion rejects such fields and card-like values (see the Phase 3 table above).
 - Device identifiers and IPs are stored as keyed hashes (HMAC-SHA256 with `SENTINEL_HASH_SALT`) because only equality checks are needed.

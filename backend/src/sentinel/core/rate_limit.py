@@ -23,6 +23,10 @@ def login_limit() -> str:
     return get_settings().login_rate_limit
 
 
+def ingestion_limit() -> str:
+    return get_settings().ingestion_rate_limit
+
+
 async def rate_limit_exceeded_handler(request: Request, exc: Exception) -> JSONResponse:
     if not isinstance(exc, RateLimitExceeded):  # pragma: no cover - registered for this type only
         raise exc

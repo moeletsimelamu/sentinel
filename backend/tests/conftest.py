@@ -66,6 +66,13 @@ def _ensure_database(url: str) -> None:
     admin.dispose()
 
 
+def alembic_config() -> Config:
+    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+    cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", TEST_DATABASE_URL.replace("%", "%%"))
+    return cfg
+
+
 @pytest.fixture(scope="session")
 def engine() -> Iterator[Engine]:
     _ensure_database(TEST_DATABASE_URL)
@@ -73,10 +80,7 @@ def engine() -> Iterator[Engine]:
     with eng.begin() as conn:
         conn.execute(text("DROP SCHEMA public CASCADE"))
         conn.execute(text("CREATE SCHEMA public"))
-    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
-    cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", TEST_DATABASE_URL.replace("%", "%%"))
-    command.upgrade(cfg, "head")
+    command.upgrade(alembic_config(), "head")
     yield eng
     eng.dispose()
 

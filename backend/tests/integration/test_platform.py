@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import pytest
+from alembic.script import ScriptDirectory
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from sentinel.modules.auth.models import User
+from tests.conftest import alembic_config
 
 pytestmark = pytest.mark.integration
 
@@ -16,7 +18,8 @@ def test_liveness_and_readiness(client: TestClient) -> None:
     assert client.get("/api/v1/health").json()["status"] == "ok"
     ready = client.get("/api/v1/health/ready")
     assert ready.status_code == 200
-    assert ready.json()["migration"] == "0001"
+    head = ScriptDirectory.from_config(alembic_config()).get_current_head()
+    assert ready.json()["migration"] == head
 
 
 def test_error_envelope_and_request_id(client: TestClient) -> None:

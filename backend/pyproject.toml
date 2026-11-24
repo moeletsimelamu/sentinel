@@ -76,6 +76,7 @@ branch = true
 
 [tool.importlinter]
 root_package = "sentinel"
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Core infrastructure does not depend on domain modules"
@@ -88,3 +89,12 @@ name = "Domain modules are independent of the HTTP app assembly"
 type = "forbidden"
 source_modules = ["sentinel.modules"]
 forbidden_modules = ["sentinel.main", "sentinel.api"]
+
+[[tool.importlinter.contracts]]
+name = "Ingestion validation and CSV parsing are pure (no database or web framework)"
+type = "forbidden"
+source_modules = [
+    "sentinel.modules.ingestion.validation",
+    "sentinel.modules.ingestion.csv_reader",
+]
+forbidden_modules = ["sqlalchemy", "fastapi", "starlette", "sentinel.core.db"]

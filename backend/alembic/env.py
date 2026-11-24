@@ -9,6 +9,9 @@ from sentinel.core.config import get_settings
 from sentinel.core.db import Base
 from sentinel.modules.audit import models as _audit_models  # noqa: F401 — register tables
 from sentinel.modules.auth import models as _auth_models  # noqa: F401
+from sentinel.modules.ingestion import models as _ingestion_models  # noqa: F401
+from sentinel.modules.jobs import models as _jobs_models  # noqa: F401
+from sentinel.modules.transactions import models as _transactions_models  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

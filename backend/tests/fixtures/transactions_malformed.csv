@@ -1,0 +1,16 @@
+external_id,customer_ref,occurred_at,amount,currency,txn_type,channel,merchant_category,status,city,country,lat,lon,device_id,is_fraud
+TX-0001,C-1001,2026-03-01T09:15:00Z,125.50,ZAR,purchase,card_present,groceries,completed,Johannesburg,ZA,-26.2041,28.0473,dev-a1,0
+TX-0002,C-1001,2026-03-01T13:40:00+02:00,48.00,zar,purchase,mobile_app,restaurants,completed,Johannesburg,ZA,-26.2041,28.0473,dev-a1,0
+TX-0003,C-1002,2026-03-02T18:05:12Z,2300.00,ZAR,transfer_out,bank_transfer,money_transfer,completed,Cape Town,ZA,-33.9249,18.4241,dev-b7,0
+TX-0004,C-1002,2026-03-02T18:06:00Z,-15.00,ZAR,purchase,online,online_marketplace,completed,Cape Town,ZA,,,dev-b7,0
+TX-0005,C-1003,2026-03-03T08:00:00Z,99.99,XYZ,purchase,online,subscriptions,completed,Durban,ZA,,,dev-c2,0
+TX-0006,C-1003,,12.00,ZAR,purchase,card_present,fuel,completed,Durban,ZA,,,dev-c2,0
+TX-0007,C-1003,2026-03-03 10:30:00,12.00,ZAR,purchase,card_present,fuel,completed,Durban,ZA,,,dev-c2,0
+TX-0002,C-1001,2026-03-04T09:00:00Z,10.00,ZAR,purchase,card_present,groceries,completed,Johannesburg,ZA,,,dev-a1,0
+TX-0008,C-1001,2026-03-01T09:15:00Z,125.50,ZAR,purchase,card_present,groceries,completed,Johannesburg,ZA,-26.2041,28.0473,dev-a1,0
+TX-0009,C-1004,2026-03-05T11:11:00Z,50.00,ZAR,teleport,online,gift_cards,completed,Pretoria,ZA,,,dev-d4,1
+TX-0010,C-1004,2026-03-05T11:12:00Z,50.00,ZAR,purchase,online,gift_cards,completed,Pretoria,ZA,95.0,28.1,dev-d4,1
+TX-0011,C-1004,2099-01-01T00:00:00Z,50.00,ZAR,purchase,online,gift_cards,completed,Pretoria,ZA,,,dev-d4,0
+TX-0012,C-1005,2026-03-06T07:45:00Z,75.25,ZAR,purchase,card_present,groceries,completed,4111 1111 1111 1111,ZA,,,dev-e5,0
+TX-0013,C-1005,2026-03-06T07:50:00Z,20.00,ZAR
+TX-0014,C-1006,2026-03-07T21:00:00Z,640.00,USD,purchase,online,electronics,declined,,,,,,0

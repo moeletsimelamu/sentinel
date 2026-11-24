@@ -12,7 +12,8 @@ Sentinel ingests synthetic financial transactions, scores them with configurable
 |---|---|
 | 1 — Requirements, domain model, architecture | ✅ Complete |
 | 2 — Backend foundation, database, authentication | ✅ Complete |
-| 3–10 | Not started |
+| 3 — Ingestion & validation | ✅ Complete |
+| 4–10 | Not started |
 
 ## Design documents
 
@@ -20,6 +21,7 @@ Sentinel ingests synthetic financial transactions, scores them with configurable
 - [Architecture](docs/ARCHITECTURE.md)
 - [Database design](docs/DATABASE.md)
 - [Synthetic data & feature pipeline](docs/DATA_PIPELINE.md)
+- [Data dictionary & import format](docs/DATA_DICTIONARY.md)
 - [Model evaluation methodology](docs/MODEL_EVALUATION.md)
 - [Detection rule catalogue](docs/RISK_RULES.md)
 - [Implementation roadmap](docs/ROADMAP.md)
@@ -29,7 +31,7 @@ Sentinel ingests synthetic financial transactions, scores them with configurable
 
 FastAPI · SQLAlchemy 2 · Pydantic 2 · Alembic · PostgreSQL · pandas · NumPy · scikit-learn · React · TypeScript · Vite · TanStack Query · Docker Compose · GitHub Actions · pytest · Vitest · Playwright
 
-## Quick start (Phase 2 backend)
+## Quick start (backend)
 
 Requires Docker Desktop. Optional: copy `.env.example` to `.env` to override defaults.
 
@@ -44,6 +46,28 @@ docker compose exec -e SENTINEL_DEMO_PASSWORD=Sentinel-Demo-2026! api python -m 
 - API docs: http://localhost:8088/api/docs · readiness: http://localhost:8088/api/v1/health/ready
 - Postgres is exposed on `127.0.0.1:5438` (ports chosen to avoid the other portfolio stacks).
 - Demo accounts: `admin@`, `analyst@`, `lead.analyst@`, `auditor@sentinel.local` (dev-only password from `.env.example`).
+
+### Import transactions
+
+A sample file with deliberately malformed rows is in `backend/tests/fixtures/transactions_malformed.csv` (the synthetic data generator arrives in Phase 5). Upload it as an analyst, then read the summary and the rejected-record report:
+
+```powershell
+$token = (Invoke-RestMethod -Method Post -Uri http://localhost:8088/api/v1/auth/login -ContentType application/json -Body '{"email":"analyst@sentinel.local","password":"Sentinel-Demo-2026!"}').access_token
+```
+
+```powershell
+$batch = Invoke-RestMethod -Method Post -Uri "http://localhost:8088/api/v1/imports?filename=sample.csv" -ContentType text/csv -InFile backend/tests/fixtures/transactions_malformed.csv -Headers @{ Authorization = "Bearer $token" }
+```
+
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8088/api/v1/imports/$($batch.id)" -Headers @{ Authorization = "Bearer $token" }
+```
+
+```powershell
+(Invoke-RestMethod -Uri "http://localhost:8088/api/v1/imports/$($batch.id)/issues" -Headers @{ Authorization = "Bearer $token" }).items | Format-Table row_number, outcome, external_id
+```
+
+The worker processes the upload within a few seconds (`queued` → `completed`). Uploading the same file again stores nothing new: every row is reported as a duplicate. Small batches can also be sent as JSON to `POST /api/v1/transactions`. Field rules and every validation code are listed in the [data dictionary](docs/DATA_DICTIONARY.md).
 
 ### Backend tests
 

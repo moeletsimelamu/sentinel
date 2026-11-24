@@ -9,7 +9,8 @@ erDiagram
   users }o--|| roles : has
   roles ||--o{ role_permissions : grants
 
-  import_batches ||--o{ rejected_records : produced
+  import_batches ||--o{ import_row_issues : produced
+  import_batches ||--o| import_files : "holds upload until processed"
   import_batches ||--o{ transactions : accepted
   customers ||--o{ transactions : made
 
@@ -53,18 +54,20 @@ erDiagram
 ### Ingestion
 | Table | Key columns | Notes |
 |---|---|---|
-| `import_batches` | id, source (`csv`/`api`), filename, file_sha256, uploaded_by, status, row_count, accepted_count, rejected_count, duplicate_count, started_at, finished_at | Unique on `file_sha256` warns re-upload of identical file |
-| `rejected_records` | id, batch_id, row_number, raw_row (jsonb, sensitive fields redacted), errors (jsonb: `[{field, code, message}]`) | Powers rejected-record report |
-| `processing_jobs` | id, kind, payload jsonb, status, attempts, run_after, locked_by, locked_at, last_error | Claimed with `FOR UPDATE SKIP LOCKED` |
+| `import_batches` | id, source (`csv`/`api`), source_system, filename, file_sha256, file_size_bytes, status (`queued`/`processing`/`completed`/`rejected`/`failed`), row_count, accepted_count, rejected_count, duplicate_count, possible_duplicate_count, ignored_columns, file_error, identical_to_batch_id, job_id, uploaded_by_id, created_at, started_at, finished_at | `file_sha256` is indexed, not unique: re-uploading the same file is allowed (rows become duplicates) and the batch links to the earlier one via `identical_to_batch_id` |
+| `import_files` | batch_id (PK), content (bytea) | Raw upload, deleted once processed. Lets the API and worker share the file without a shared volume |
+| `import_row_issues` | id, batch_id, row_number, outcome (`rejected`/`duplicate`/`possible_duplicate`), external_id, transaction_id, reasons (jsonb: `[{field, code, message}]`), raw_row (jsonb, rejected rows only, redacted) | Powers the rejected-record report. Renamed from the Phase 1 `rejected_records` because possible duplicates are reported here too, although they are stored |
+| `processing_jobs` | id, kind, payload jsonb, status (`queued`/`running`/`succeeded`/`dead`), attempts, max_attempts, run_after, locked_by, locked_at, last_error, created_at, finished_at | Claimed with `FOR UPDATE SKIP LOCKED`; retried with exponential backoff; jobs whose worker died are re-queued after the lock timeout |
 
 ### Transactions
 | Table | Key columns | Notes |
 |---|---|---|
-| `customers` | id, external_ref (unique), segment, home_city, created_at | Pseudonymous synthetic id; **no** name, DOB, gender, ethnicity, nationality, address |
+| `customers` | id, external_ref (unique), created_at | Pseudonymous synthetic id; **no** name, DOB, gender, ethnicity, nationality, address. The generator's `segment` and `home_city` are deliberately not stored: segment is a generator artefact that would leak into features, and home city is derivable from history |
 | `transactions` | id, external_id, source_system, customer_id, amount, currency, occurred_at, txn_type, merchant_category, channel, city, country, lat, lon, device_id_hash, status, batch_id, content_hash, ingested_at | Immutable after insert |
 
-Constraints: `UNIQUE (source_system, external_id)`; `CHECK (amount > 0)`; enum checks on `currency`, `txn_type`, `channel`, `status`; `CHECK (lat BETWEEN -90 AND 90)`.
-`device_id_hash` stores a salted SHA-256 of the incoming device identifier — the system only needs equality comparisons.
+Constraints: `UNIQUE (source_system, external_id)`; `CHECK (amount > 0)`; enum checks on `currency`, `txn_type`, `channel`, `merchant_category`, `status` (a test asserts they match `sentinel.core.vocabulary`); lat/lon ranges and both-or-neither. `UPDATE`, `DELETE` and `TRUNCATE` are rejected by trigger.
+`device_id_hash` stores a keyed hash (HMAC-SHA256 with `SENTINEL_HASH_SALT`) of the incoming device identifier — the system only needs equality comparisons. `content_hash` is a SHA-256 of all fields except `external_id`, used to flag possible duplicates.
+The full field list and validation rules are in [DATA_DICTIONARY.md](DATA_DICTIONARY.md).
 
 ### Detection configuration (versioned, never edited in place)
 | Table | Key columns | Notes |
@@ -127,7 +130,7 @@ Constraints: `UNIQUE (source_system, external_id)`; `CHECK (amount > 0)`; enum c
 
 ## 4. Integrity mechanisms
 
-1. **Append-only enforcement** — trigger `forbid_modification()` raising an exception on `UPDATE`/`DELETE` for `audit_log`, `alert_events`, `case_events`, `case_notes`, `risk_assessments`, `rule_hits`.
+1. **Append-only enforcement** — trigger `forbid_modification()` raising an exception on `UPDATE`/`DELETE` for `audit_log`, `transactions`, `alert_events`, `case_events`, `case_notes`, `risk_assessments`, `rule_hits`.
 2. **Optimistic concurrency** — `alerts.version`, `cases.version`; `UPDATE … WHERE id = :id AND version = :v` → 0 rows ⇒ HTTP 409.
 3. **Versioned configuration** — rules and scoring config are never updated in place, so any historical assessment can be fully reproduced from the versions it references.
 4. **Label isolation** — `synthetic_labels` is read only by the evaluation/monitoring module; an architecture test asserts no scoring or alert code imports it.

@@ -46,7 +46,19 @@ class Settings(BaseSettings):
     # --- HTTP ------------------------------------------------------------
     cors_origins: list[str] = ["http://localhost:5173"]
     login_rate_limit: str = "10/minute"
+    ingestion_rate_limit: str = "30/minute"
     rate_limit_enabled: bool = True
+
+    # --- ingestion ---------------------------------------------------------
+    import_max_bytes: int = Field(default=64 * 1024 * 1024, ge=1024)
+    import_max_rows: int = Field(default=250_000, ge=1)
+    api_ingest_max_records: int = Field(default=1000, ge=1, le=10_000)
+
+    # --- background jobs ---------------------------------------------------
+    job_max_attempts: int = Field(default=3, ge=1, le=10)
+    job_retry_base_seconds: int = Field(default=10, ge=1)
+    job_lock_timeout_minutes: int = Field(default=15, ge=1)
+    worker_poll_seconds: float = Field(default=2.0, gt=0)
 
     @model_validator(mode="after")
     def _refuse_insecure_production(self) -> Settings:
