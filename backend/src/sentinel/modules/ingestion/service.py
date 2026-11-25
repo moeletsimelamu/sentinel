@@ -37,11 +37,12 @@ from sentinel.modules.ingestion.validation import (
     is_forbidden_field,
     normalise_field_name,
 )
+from sentinel.modules.jobs import kinds
 from sentinel.modules.jobs import service as jobs
 
 log = get_logger(__name__)
 
-INGEST_CSV_JOB = "ingest_csv"
+INGEST_CSV_JOB = kinds.INGEST_CSV
 _UNSAFE_FILENAME_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 
@@ -170,6 +171,7 @@ def process_csv_batch(db: Session, settings: Settings, payload: dict[str, Any]) 
         for r in parsed.rows
     ]
     ingest_rows(db, batch, rows, settings=settings, now=_now())
+    _queue_scoring(db, settings, batch)
     _finish(db, batch, BatchStatus.COMPLETED, None, purge=file)
 
 
@@ -187,6 +189,15 @@ def fail_csv_batch(db: Session, payload: dict[str, Any], error: str) -> None:
         purge=file,
         extra={"last_error": error},
     )
+
+
+def _queue_scoring(db: Session, settings: Settings, batch: ImportBatch) -> None:
+    """Accepted transactions are scored asynchronously, in the same commit as the import."""
+    if batch.accepted_count > 0:
+        job = jobs.enqueue(
+            db, kinds.SCORE_BATCH, {"batch_id": str(batch.id), "rescore": False}, settings=settings
+        )
+        batch.scoring_job_id = job.id
 
 
 def _finish(
@@ -275,6 +286,7 @@ def ingest_api_records(
     outcome = ingest_rows(db, batch, rows, settings=settings, now=now)
     batch.status = BatchStatus.COMPLETED
     batch.finished_at = _now()
+    _queue_scoring(db, settings, batch)
     audit.record(
         db,
         actor=_actor(by),

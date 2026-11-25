@@ -69,20 +69,22 @@ Constraints: `UNIQUE (source_system, external_id)`; `CHECK (amount > 0)`; enum c
 `device_id_hash` stores a keyed hash (HMAC-SHA256 with `SENTINEL_HASH_SALT`) of the incoming device identifier — the system only needs equality comparisons. `content_hash` is a SHA-256 of all fields except `external_id`, used to flag possible duplicates.
 The full field list and validation rules are in [DATA_DICTIONARY.md](DATA_DICTIONARY.md).
 
-### Detection configuration (versioned, never edited in place)
+### Detection configuration (versioned, never edited in place — Phase 4)
 | Table | Key columns | Notes |
 |---|---|---|
-| `rule_definitions` | id, code (unique, e.g. `VELOCITY_1H`), name, description, category | The rule's identity |
-| `rule_versions` | id, rule_id, version, params jsonb (validated by per-rule Pydantic schema), weight, severity, force_alert, is_active, created_by, created_at, change_reason | Admin edit → new row |
-| `rule_sets` | id, version, created_by, created_at | Snapshot of the active rule versions at a point in time |
-| `rule_set_members` | rule_set_id, rule_version_id | |
-| `scoring_configs` | id, version, w_rule, w_model, rule_cap, bands jsonb, alert_threshold, is_active, created_by, change_reason | Only one active (partial unique index) |
+| `rule_definitions` | id, code (unique, e.g. `VELOCITY_1H`), name, description, category | The rule's identity; seeded from the code catalogue (a test checks they match) |
+| `rule_versions` | id, rule_id, version, params jsonb (validated by the rule's Pydantic schema), weight, severity, force_alert, is_active, change_reason, created_by_id, created_at | Admin edit → new row. **Append-only** |
+| `rule_sets` | id, version, change_reason, created_by_id, created_at | Snapshot taken on every rule change. The latest version is the one used for scoring. **Append-only** |
+| `rule_set_members` | rule_set_id, rule_version_id | Pins the current version of **every** rule (active or not), so a rule set fully describes the configuration. **Append-only** |
+| `scoring_configs` | id, version, w_rule, w_model, rule_cap, bands jsonb, alert_threshold, is_active, change_reason, created_by_id | Only one active (partial unique index). v1 seeded in Phase 4; the admin API to change it comes with alerts in Phase 7 |
 
-### Scoring
+### Scoring (Phase 4, rules-only)
 | Table | Key columns | Notes |
 |---|---|---|
-| `risk_assessments` | id, transaction_id, risk_score (0–100), risk_category, model_version_id (nullable), model_score, scoring_config_id, rule_set_id, reasons jsonb, contributions jsonb, assessed_at, job_id | **Append-only.** Re-scoring creates a new row; latest is found via index |
-| `rule_hits` | assessment_id, rule_version_id, observed jsonb, threshold jsonb, weight_applied | One row per triggered rule — queryable ("which rule fires most?") |
+| `risk_assessments` | id, transaction_id, mode (`rules_only`/`combined`), rule_score, model_score, model_version_id (FK added in Phase 6), risk_score (0–100), risk_category, force_alert, scoring_config_id, rule_set_id, feature_set_version, features jsonb, reasons jsonb, job_id, assessed_at | **Append-only.** Re-scoring creates a new row; the latest is found via `(transaction_id, assessed_at)`. `features` is a snapshot of the exact values the rules saw |
+| `rule_hits` | id, assessment_id, rule_version_id, rule_code, weight_applied, severity, force_alert, observed jsonb, threshold jsonb, explanation | One row per triggered rule — queryable ("which rule fires most?"). **Append-only** |
+
+`processing_jobs.result` (jsonb) holds each job's summary (e.g. assessments by category, hits by rule); `import_batches.scoring_job_id` links an import to its scoring job.
 
 ### Alerts
 | Table | Key columns | Notes |
@@ -130,7 +132,7 @@ The full field list and validation rules are in [DATA_DICTIONARY.md](DATA_DICTIO
 
 ## 4. Integrity mechanisms
 
-1. **Append-only enforcement** — trigger `forbid_modification()` raising an exception on `UPDATE`/`DELETE` for `audit_log`, `transactions`, `alert_events`, `case_events`, `case_notes`, `risk_assessments`, `rule_hits`.
+1. **Append-only enforcement** — trigger `forbid_modification()` raising an exception on `UPDATE`/`DELETE`/`TRUNCATE` for `audit_log`, `transactions`, `rule_versions`, `rule_sets`, `rule_set_members`, `alert_events`, `case_events`, `case_notes`, `risk_assessments`, `rule_hits`.
 2. **Optimistic concurrency** — `alerts.version`, `cases.version`; `UPDATE … WHERE id = :id AND version = :v` → 0 rows ⇒ HTTP 409.
 3. **Versioned configuration** — rules and scoring config are never updated in place, so any historical assessment can be fully reproduced from the versions it references.
 4. **Label isolation** — `synthetic_labels` is read only by the evaluation/monitoring module; an architecture test asserts no scoring or alert code imports it.

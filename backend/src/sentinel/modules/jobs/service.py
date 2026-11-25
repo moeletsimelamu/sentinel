@@ -77,7 +77,14 @@ def claim_next(db: Session, worker_id: str, now: datetime | None = None) -> Proc
     return job
 
 
-def mark_succeeded(db: Session, job: ProcessingJob, now: datetime | None = None) -> None:
+def mark_succeeded(
+    db: Session,
+    job: ProcessingJob,
+    now: datetime | None = None,
+    *,
+    result: dict[str, Any] | None = None,
+) -> None:
+    job.result = result
     job.status = JobStatus.SUCCEEDED
     job.finished_at = now or _now()
     job.locked_by = None

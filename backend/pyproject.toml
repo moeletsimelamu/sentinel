@@ -98,3 +98,16 @@ source_modules = [
     "sentinel.modules.ingestion.csv_reader",
 ]
 forbidden_modules = ["sqlalchemy", "fastapi", "starlette", "sentinel.core.db"]
+
+[[tool.importlinter.contracts]]
+name = "Feature engineering and detection are pure (shared with ML training)"
+type = "forbidden"
+source_modules = ["sentinel.features", "sentinel.detection"]
+forbidden_modules = [
+    "sqlalchemy",
+    "fastapi",
+    "starlette",
+    "sentinel.core.db",
+    "sentinel.modules",
+    "sentinel.api",
+]

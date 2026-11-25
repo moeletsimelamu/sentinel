@@ -87,6 +87,8 @@ Implemented in `backend/src/sentinel/modules/ingestion/` (pure `validation.py` a
 
 ## 4. Feature engineering (`backend/src/sentinel/features/`)
 
+> **Phase 4 status:** the behavioural subset used by detection rules is implemented as `build_feature_rows(history, target_ids)` in **pure Python** (incremental sliding windows per customer, linear time) rather than pandas. Reasons: exact half-open windows are simple to make leakage-proof incrementally, the API/worker image needs no scientific stack yet, and the same function can be called from `ml/` (rows convert directly to a DataFrame). Phase 5 adds the remaining ML features, revisits pandas if training-scale performance requires it, and keeps a parity test between the two paths. Implemented definitions are in [DATA_DICTIONARY.md §5](DATA_DICTIONARY.md).
+
 One pure function, `build_features(history_df, target_ids, config) -> FeatureFrame`. All behavioural aggregates use only transactions **strictly earlier** than the one being scored for the same customer.
 
 ### 4.1 Feature catalogue (v1)

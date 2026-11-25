@@ -12,6 +12,11 @@ from enum import StrEnum
 # ISO 4217 codes accepted by the simulation.
 CURRENCIES: frozenset[str] = frozenset({"ZAR", "USD", "EUR", "GBP"})
 
+# Fixed, illustrative conversion rates used to compare amounts across currencies.
+# The simulation has no live FX feed; these are not market rates.
+FX_TO_ZAR: dict[str, float] = {"ZAR": 1.0, "USD": 18.0, "EUR": 19.5, "GBP": 23.0}
+REPORTING_CURRENCY = "ZAR"
+
 
 class TxnType(StrEnum):
     PURCHASE = "purchase"

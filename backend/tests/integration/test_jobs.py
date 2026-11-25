@@ -31,12 +31,12 @@ FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "transactions_malfo
 PAST = datetime(2020, 1, 1, tzinfo=UTC)
 
 
-def _boom(_db: Session, _payload: dict[str, Any]) -> None:
+def _boom(_db: Session, _payload: dict[str, Any], _job_id: uuid.UUID) -> None:
     raise RuntimeError("kaput")
 
 
-def _ok(_db: Session, _payload: dict[str, Any]) -> None:
-    return None
+def _ok(_db: Session, _payload: dict[str, Any], _job_id: uuid.UUID) -> dict[str, Any]:
+    return {"done": True}
 
 
 def _run(db: Session, handlers: dict[str, JobHandler]) -> bool:
@@ -49,6 +49,7 @@ def test_successful_job(db: Session) -> None:
     assert _run(db, {"noop": JobHandler(_ok)})
     db.refresh(job)
     assert job.status == JobStatus.SUCCEEDED and job.attempts == 1
+    assert job.result == {"done": True}
     assert job.finished_at is not None and job.locked_by is None
     assert not _run(db, {"noop": JobHandler(_ok)})  # queue now empty
 

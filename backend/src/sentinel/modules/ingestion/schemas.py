@@ -37,6 +37,7 @@ class ImportBatchOut(BaseModel):
     ignored_columns: list[str]
     file_error: FileError | None
     identical_to_batch_id: uuid.UUID | None
+    scoring_job_id: uuid.UUID | None
     uploaded_by_id: uuid.UUID | None
     created_at: datetime
     started_at: datetime | None

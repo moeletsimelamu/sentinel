@@ -13,7 +13,8 @@ Sentinel ingests synthetic financial transactions, scores them with configurable
 | 1 — Requirements, domain model, architecture | ✅ Complete |
 | 2 — Backend foundation, database, authentication | ✅ Complete |
 | 3 — Ingestion & validation | ✅ Complete |
-| 4–10 | Not started |
+| 4 — Rule-based detection | ✅ Complete |
+| 5–10 | Not started |
 
 ## Design documents
 
@@ -23,7 +24,7 @@ Sentinel ingests synthetic financial transactions, scores them with configurable
 - [Synthetic data & feature pipeline](docs/DATA_PIPELINE.md)
 - [Data dictionary & import format](docs/DATA_DICTIONARY.md)
 - [Model evaluation methodology](docs/MODEL_EVALUATION.md)
-- [Detection rule catalogue](docs/RISK_RULES.md)
+- [Detection rule catalogue & implementation notes](docs/RISK_RULES.md)
 - [Implementation roadmap](docs/ROADMAP.md)
 - [Security](docs/SECURITY.md)
 
@@ -68,6 +69,20 @@ Invoke-RestMethod -Uri "http://localhost:8088/api/v1/imports/$($batch.id)" -Head
 ```
 
 The worker processes the upload within a few seconds (`queued` → `completed`). Uploading the same file again stores nothing new: every row is reported as a duplicate. Small batches can also be sent as JSON to `POST /api/v1/transactions`. Field rules and every validation code are listed in the [data dictionary](docs/DATA_DICTIONARY.md).
+
+### Rule-based detection
+
+Each completed import is scored automatically by the worker (rules-only until a model is trained in Phase 6). Look at why a transaction was flagged:
+
+```powershell
+$txn = (Invoke-RestMethod -Uri "http://localhost:8088/api/v1/transactions?batch_id=$($batch.id)" -Headers @{ Authorization = "Bearer $token" }).items[0]
+```
+
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8088/api/v1/transactions/$($txn.id)/assessments" -Headers @{ Authorization = "Bearer $token" } | ConvertTo-Json -Depth 6
+```
+
+Admins tune rules with `POST /api/v1/rules/{code}/versions` (new version + new rule set, audited); analysts re-score an import with `POST /api/v1/detection/runs`. See [RISK_RULES.md](docs/RISK_RULES.md).
 
 ### Backend tests
 

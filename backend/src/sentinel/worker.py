@@ -10,6 +10,7 @@ import os
 import signal
 import socket
 import threading
+import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import FrameType
@@ -23,8 +24,10 @@ from sentinel.core.db import get_session_factory
 from sentinel.core.logging import configure_logging, get_logger
 from sentinel.modules.auth import models as _auth_models  # noqa: F401 - FK targets
 from sentinel.modules.ingestion import service as ingestion
+from sentinel.modules.jobs import kinds
 from sentinel.modules.jobs import service as jobs
 from sentinel.modules.jobs.models import JobStatus
+from sentinel.modules.scoring import service as scoring
 
 log = get_logger("sentinel.worker")
 
@@ -34,17 +37,19 @@ STALE_CHECK_EVERY_TICKS = 30
 
 @dataclass(frozen=True)
 class JobHandler:
-    handle: Callable[[Session, dict[str, Any]], None]
+    # (session, payload, job id) -> optional summary stored as the job's ``result``
+    handle: Callable[[Session, dict[str, Any], uuid.UUID], dict[str, Any] | None]
     # Called in a fresh transaction once the job has failed for the last time.
     on_dead: Callable[[Session, dict[str, Any], str], None] | None = None
 
 
 def default_handlers(settings: Settings) -> dict[str, JobHandler]:
     return {
-        ingestion.INGEST_CSV_JOB: JobHandler(
-            handle=lambda db, payload: ingestion.process_csv_batch(db, settings, payload),
+        kinds.INGEST_CSV: JobHandler(
+            handle=lambda db, payload, _job_id: ingestion.process_csv_batch(db, settings, payload),
             on_dead=ingestion.fail_csv_batch,
         ),
+        kinds.SCORE_BATCH: JobHandler(handle=scoring.process_score_batch),
     }
 
 
@@ -73,10 +78,10 @@ def process_next(
         db.commit()
         return True
     try:
-        handler.handle(db, payload)
+        result = handler.handle(db, payload, job_id)
         claimed = jobs.get_job(db, job_id)
         if claimed is not None and claimed.status == JobStatus.RUNNING:
-            jobs.mark_succeeded(db, claimed)
+            jobs.mark_succeeded(db, claimed, result=result)
         db.commit()
         bound.info("job_succeeded")
     except Exception as exc:

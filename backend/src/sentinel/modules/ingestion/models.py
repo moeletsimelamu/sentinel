@@ -72,6 +72,9 @@ class ImportBatch(Base):
     job_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("processing_jobs.id", ondelete="SET NULL")
     )
+    scoring_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("processing_jobs.id", ondelete="SET NULL")
+    )
     uploaded_by_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT")
     )

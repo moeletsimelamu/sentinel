@@ -1,6 +1,6 @@
 # Sentinel — Security
 
-> Status: Phase 3 (ingestion). Updated as each phase adds attack surface; finalised in Phase 10.
+> Status: Phase 4 (detection). Updated as each phase adds attack surface; finalised in Phase 10.
 > Sentinel is an educational simulation using synthetic data. It holds no real customer, card or banking data.
 
 ## Reporting
@@ -45,6 +45,17 @@ This is a portfolio project. Please report security issues privately to the repo
 | Job errors | Database errors are recorded as exception type + SQLSTATE only, because driver messages can echo row values | `jobs/service.describe_error` |
 | Filenames | Display-only; path components and control characters stripped; never used to touch the filesystem | `ingestion/service.safe_filename` |
 | Audit | `import.uploaded` (user), `import.completed` / `import.rejected` / `import.failed` (system or user) with counts — never row contents | `ingestion/service.py` |
+
+## Controls implemented (Phase 4 — detection)
+
+| Area | Control | Where |
+|---|---|---|
+| No code injection via configuration | Admins tune typed, bounded parameters (Pydantic, extra keys refused); rule logic exists only in reviewed code | `detection/rules.py`, `detection/engine.py` |
+| Separation of duties | Only `rules:configure` (admins) can change rules; analysts can re-score (`detection:run`) but not tune detection; auditors read only | `rules/router.py`, `scoring/router.py` |
+| Reproducibility | Rule versions, rule sets, assessments and rule hits are append-only (trigger); each assessment records the rule set, scoring config and feature values it used | migration `0003` |
+| Concurrent edits | `expected_version` → 409 on stale edits; a transaction-level advisory lock serialises rule-set snapshots | `rules/service.py` |
+| Audit | `rule.version_created` (before/after diff + reason) and `detection.run_requested` | `rules/service.py`, `scoring/service.py` |
+| Wording | Explanations describe unusual activity; a test asserts none contain "fraud" | `tests/unit/test_rules.py` |
 
 ## Known limitations / planned work
 
