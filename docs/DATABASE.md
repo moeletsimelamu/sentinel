@@ -105,8 +105,8 @@ The full field list and validation rules are in [DATA_DICTIONARY.md](DATA_DICTIO
 ### Models & monitoring
 | Table | Key columns | Notes |
 |---|---|---|
-| `model_versions` | id, name, version, family (`logreg`/`random_forest`/`isolation_forest`/`rules_baseline`), artefact_path, artefact_sha256, feature_schema_hash, training_dataset_version, status (`registered`/`active`/`retired`), registered_at, activated_by, activated_at | Partial unique index: one `active` |
-| `model_evaluations` | id, model_version_id, dataset_version, split, metrics jsonb (precision, recall, f1, pr_auc, roc_auc, fpr, brier…), confusion jsonb, curves jsonb (downsampled PR/ROC points), threshold, per_typology jsonb, created_at | Assessment history for auditors |
+| `model_versions` | id, name, version (unique), family (`logreg`/`random_forest`/`isolation_forest`/`rules_baseline`), artefact_path (relative to `SENTINEL_MODELS_DIR`), artefact_sha256, feature_schema_hash, feature_set_version, training_dataset_version, selected_by_experiment, manifest jsonb, status (`registered`/`active`/`retired`), registered_at, activated_by_id, activated_at | Phase 6. Partial unique index: one `active`. Rule baseline has no artefact (CHECK). `risk_assessments.model_version_id` now references it |
+| `model_evaluations` | id, model_version_id, dataset_version, split (`validation`/`test`/`holdout`), threshold_kind (`budget`/`f1`), threshold, metrics jsonb (confusion counts, precision, recall, f1, pr_auc, roc_auc, fpr, alerts/FP per 1k, value detection, brier), ci95 jsonb, curves jsonb (PR, ROC, histograms, reliability), created_at | Phase 6. **Append-only.** Per-typology results stay in the experiment report |
 | `drift_snapshots` | id, model_version_id, window_start, window_end, feature_psi jsonb, score_psi, prediction_count, alert_count, created_at | Computed daily/on demand by worker |
 | `synthetic_labels` | transaction_id (PK), is_fraud_injected, typology, scenario_id | **Evaluation only.** No foreign key from scoring tables; not exposed through analyst endpoints |
 

@@ -4,6 +4,10 @@ seed-demo-users
     Creates one demo user per role (plus a lead analyst). The password is read from
     ``SENTINEL_DEMO_PASSWORD``; the command refuses to run when ``SENTINEL_ENV=production``.
     Idempotent: existing users are left untouched.
+
+register-models
+    Registers every ``<family>/<version>/manifest.json`` under ``SENTINEL_MODELS_DIR``.
+    Verifies feature schema and artefact SHA-256; never unpickles. Idempotent.
 """
 
 from __future__ import annotations
@@ -85,13 +89,41 @@ def seed_demo_users() -> int:
     return 0
 
 
+def register_models() -> int:
+    from sentinel.modules.models import service as models
+
+    settings = get_settings()
+    folders = models.discover(settings)
+    if not folders:
+        print(f"No model manifests under {settings.models_dir}", file=sys.stderr)  # noqa: T201
+        return 1
+    failures = 0
+    with get_session_factory()() as db:
+        for folder in folders:
+            try:
+                model, created = models.register(
+                    db, settings, folder, actor=Actor.system(), ctx=RequestContext.offline()
+                )
+            except models.RegistrationError as exc:
+                db.rollback()
+                failures += 1
+                print(f"REFUSED  {folder.name}: {exc}", file=sys.stderr)  # noqa: T201
+                continue
+            state = "registered" if created else "exists  "
+            print(f"{state} {model.version}")  # noqa: T201
+    return 1 if failures else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sentinel")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("seed-demo-users", help="Create demo admin/analyst/auditor accounts")
+    sub.add_parser("register-models", help="Register trained models from SENTINEL_MODELS_DIR")
     args = parser.parse_args(argv)
     if args.command == "seed-demo-users":
         return seed_demo_users()
+    if args.command == "register-models":
+        return register_models()
     return 1  # pragma: no cover
 
 

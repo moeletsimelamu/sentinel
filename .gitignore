@@ -24,8 +24,8 @@ playwright-report/
 test-results/
 
 # data & models (regenerated from seeds; see docs/DATA_PIPELINE.md)
-data/
-models/
+/data/
+/models/
 *.parquet
 ml/notebooks/.ipynb_checkpoints/
 

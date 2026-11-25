@@ -117,7 +117,7 @@ Computed by `sentinel.features.build_feature_rows` for every scored transaction 
 
 ## 6. Model inputs (`sentinel.features.MODEL_FEATURES`)
 
-`to_model_vector(row, reference)` turns a feature row into 34 floats in a fixed order identified by `FEATURE_SCHEMA_HASH` (recorded in each dataset card and, from Phase 6, each model manifest). Encoding rules:
+`to_model_vector(row, reference)` turns a feature row into 33 floats in a fixed order identified by `FEATURE_SCHEMA_HASH` (recorded in each dataset card and, from Phase 6, each model manifest). Encoding rules:
 
 - Heavy-tailed values are log-transformed (`log_amount_zar`, `log_amount_vs_cust_median_90d`, velocity ratio, 24 h sums, distance, speed, seconds since previous).
 - Unknowns are explicit: "is new" flags are 1 / 0 / -1 (unknown); rarities, shift, distance and speed are -1 when unknown; `has_history` tells a model how far to trust behavioural ratios.

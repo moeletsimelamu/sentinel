@@ -23,7 +23,17 @@ def main(argv: list[str] | None = None) -> int:
     gen.add_argument("--seed", type=int, default=42)
     gen.add_argument("--out", type=Path, default=Path("../data"))
     gen.add_argument("--no-features", action="store_true", help="Skip feature extraction")
+    exp = sub.add_parser("experiment", help="Generate (if needed), train and evaluate everything")
+    exp.add_argument("--profile", default="full")
+    exp.add_argument("--seed", type=int, default=42)
+    exp.add_argument("--data", type=Path, default=Path("../data"))
+    exp.add_argument("--models", type=Path, default=Path("../models"))
+    exp.add_argument("--report", type=Path, default=None, help="Report path (without suffix)")
+    exp.add_argument("--bootstrap", type=int, default=1000)
     args = parser.parse_args(argv)
+
+    if args.command == "experiment":
+        return _experiment(args)
 
     started = time.perf_counter()
     profile = load_profile(args.profile)
@@ -35,6 +45,21 @@ def main(argv: list[str] | None = None) -> int:
         f"{c['fraud_injected_pct']}% injected fraud -> {built.path} "
         f"({time.perf_counter() - started:.1f}s)\n"
     )
+    return 0
+
+
+def _experiment(args: argparse.Namespace) -> int:
+    from sentinel_ml.generate.generator import dataset_version
+    from sentinel_ml.train.experiment import run
+
+    profile = load_profile(args.profile)
+    folder = args.data / dataset_version(profile, args.seed)
+    if not (folder / "dataset_card.json").is_file():
+        sys.stdout.write(f"Generating {folder.name}...\n")
+        build_dataset(generate(profile, args.seed), args.data)
+    report = args.report or Path("reports") / f"experiment-{folder.name}"
+    result = run(folder, args.models, report, bootstrap=args.bootstrap)
+    sys.stdout.write(f"Selected: {result['selection']['selected']}\n")
     return 0
 
 

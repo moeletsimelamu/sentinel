@@ -70,6 +70,42 @@ A simpler model wins ties. If no ML model beats the rule baseline by a meaningfu
 
 The dashboard shows drift and performance in separate panels with this distinction stated in the UI.
 
-## 7. Results
+## 7. Results (Phase 6)
 
-_To be completed in Phase 6._
+Dataset `full-1.0.0-42` (379,141 transactions, 0.75% injected fraud in 480 episodes; train 201,619 / validation 72,584 / test 66,791 / holdout 38,046 / excluded 101). Full generated report: [reports/experiment-full-1.0.0-42.md](reports/experiment-full-1.0.0-42.md) (JSON with curves alongside). Reproduce with `sentinel-ml experiment --profile full --seed 42`; a test asserts two runs give identical metrics and artefact hashes.
+
+### Test split (evaluated once, thresholds from validation, budget 10 alerts / 1,000)
+
+| Candidate | PR-AUC [95% CI] | Recall @ budget [95% CI] | Precision | Alerts / 1k | Value detected |
+|---|---|---|--:|--:|--:|
+| Rules v1 (defaults) | 0.112 [0.082, 0.143] | 18.5% [14.9%, 22.1%] | 27.7% | 4.5 | 34.1% |
+| Rules tuned | 0.109 [0.079, 0.141] | 21.9% [17.7%, 25.6%] | 20.7% | 7.2 | 38.7% |
+| Logistic regression | 0.356 [0.306, 0.403] | 33.6% [29.1%, 37.8%] | 53.1% | 4.3 | 36.2% |
+| **Random forest (selected)** | **0.565** [0.514, 0.612] | **64.5%** [59.8%, 68.8%] | 49.7% | 8.8 | 72.9% |
+| Isolation forest | 0.367 [0.319, 0.418] | 43.5% [39.0%, 48.3%] | 34.4% | 8.6 | 62.2% |
+| Hybrid (0.25 rules + 0.75 RF) | 0.552 [0.499, 0.602] | 62.5% [58.0%, 67.0%] | 52.5% | 8.1 | 74.6% |
+
+### What the results say
+
+1. **ML clearly beats the rules** on this data: the random forest's recall at the same alert budget is about three times the rule baseline's, with non-overlapping intervals. By the pre-registered criteria (§5) adding ML is justified.
+2. **Random forest was selected on validation** (recall 68.3% vs hybrid 66.6%). On test the hybrid is statistically indistinguishable from it, so the simpler candidate stands. Phase 7 still runs rules alongside the model in the application, because rules provide readable reasons and catch patterns the model misses (below).
+3. **Impossible travel is the model's blind spot** (12.5% recall vs 25% for rules). The rules-vs-model table shows 17 frauds caught only by rules. The `IMPOSSIBLE_TRAVEL` rule keeps `force_alert`.
+4. **Low-and-slow fraud** is the largest share of missed fraud (79 of 176 misses), as designed; rules catch none of it.
+5. **Benign anomalies:** the forest flags 1.3% of legitimate travel transactions versus 4.1% for the rules — the false-positive reduction ML is meant to provide.
+6. **Isolation forest does not generalise to new customers** (holdout PR-AUC 0.096 vs 0.367 on test, and 15.6 alerts / 1,000 against a budget of 10): anomaly scores are relative to the training population and new customers look anomalous simply for being new.
+7. **Logistic regression is weak** (PR-AUC 0.356): the useful signal is in interactions (new device × amount, inflow × outflow) that a linear model cannot express without hand-built crosses.
+8. **Stable across seeds:** random forest test PR-AUC 0.563 ± 0.003 over 5 seeds.
+9. **Leakage check passed:** the best single input reaches PR-AUC 0.171 on its own (prevalence 0.007); nothing approaches 0.95.
+10. **Card testing at 100% recall** is a warning sign that this typology is too easy in the generator; it is flagged in the model card rather than celebrated.
+
+### Rule recalibration
+
+Coordinate search on validation recommended one change: `BEHAVIOUR_SHIFT.min_shift` 0.5 → 0.6. The log shows the deeper problem: at 0.6 the rule still fires on 30% of validation transactions, and at 0.9 (0.9% hit rate) recall at budget falls. The rule's design (comparing a few days' category mix with 90 days) carries almost no signal at any threshold; Phase 7 reviews whether to deactivate it rather than only re-tune it.
+
+### Deviations from the protocol (§2)
+
+- **Calibration:** the validation period was split in time — calibrators fitted on the first half, sigmoid vs isotonic chosen by Brier score on the second half (isotonic won for both models); thresholds were then set on all of validation. Validation numbers are therefore slightly optimistic; test is unaffected.
+- **Seeds:** logistic regression uses a deterministic solver, so one fit is reported; random and isolation forests use 5 seeds.
+- **Isolation forest** has no labels to tune on; fixed parameters (200 trees, 4,096 samples) are reported as-is.
+- **Bootstrap** resamples transactions, not episodes; intervals are optimistic for clustered fraud.
+- **Gradient boosting** was not added: the random forest did not underperform, and §1 says it would not be added just to have more models.

@@ -15,7 +15,8 @@ Sentinel ingests synthetic financial transactions, scores them with configurable
 | 3 — Ingestion & validation | ✅ Complete |
 | 4 — Rule-based detection | ✅ Complete |
 | 5 — Synthetic data & feature engineering | ✅ Complete |
-| 6–10 | Not started |
+| 6 — ML experimentation & evaluation | ✅ Complete |
+| 7–10 | Not started |
 
 ## Design documents
 
@@ -24,7 +25,8 @@ Sentinel ingests synthetic financial transactions, scores them with configurable
 - [Database design](docs/DATABASE.md)
 - [Synthetic data & feature pipeline](docs/DATA_PIPELINE.md)
 - [Data dictionary & import format](docs/DATA_DICTIONARY.md)
-- [Model evaluation methodology](docs/MODEL_EVALUATION.md)
+- [Model evaluation methodology & results](docs/MODEL_EVALUATION.md)
+- [Model card](docs/MODEL_CARD.md)
 - [Detection rule catalogue & implementation notes](docs/RISK_RULES.md)
 - [Implementation roadmap](docs/ROADMAP.md)
 - [Security](docs/SECURITY.md)
@@ -92,6 +94,20 @@ cd ml; python -m uv sync --python 3.12; .\.venv\Scripts\sentinel-ml.exe generate
 ```
 
 Writes `data/demo-1.0.0-42/` (about 97k transactions, git-ignored) with a dataset card. Upload `ingest/transactions_part_001.csv` with the import command above to load it into the app; the labels stay in `labels.parquet` and are never ingested. The exploration notebook is `ml/notebooks/01_eda_outliers.ipynb`.
+
+### Train and evaluate models
+
+```powershell
+cd ml; .\.venv\Scripts\sentinel-ml.exe experiment --profile full --seed 42
+```
+
+Generates `full-1.0.0-42` if needed (about 380k transactions), then runs the whole protocol in [MODEL_EVALUATION.md](docs/MODEL_EVALUATION.md): rule baseline, logistic regression, random forest, isolation forest and a hybrid, tuned and thresholded on validation, evaluated once on test with bootstrap intervals. About 20 minutes on a laptop. Writes artefacts with manifests to `models/` (git-ignored) and the report to `docs/reports/`. Register them with the running app (hashes and feature schema are verified; artefacts are never unpickled at registration):
+
+```powershell
+docker compose exec api python -m sentinel.cli register-models
+```
+
+Compare them at `GET /api/v1/models`. Results and the selected model are described in the [model card](docs/MODEL_CARD.md).
 
 ### Backend tests
 

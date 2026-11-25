@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, SecretStr, model_validator
@@ -53,6 +54,9 @@ class Settings(BaseSettings):
     import_max_bytes: int = Field(default=64 * 1024 * 1024, ge=1024)
     import_max_rows: int = Field(default=250_000, ge=1)
     api_ingest_max_records: int = Field(default=1000, ge=1, le=10_000)
+
+    # --- model registry ------------------------------------------------------
+    models_dir: Path = Path("models")  # root of model artefact folders (read-only mount)
 
     # --- background jobs ---------------------------------------------------
     job_max_attempts: int = Field(default=3, ge=1, le=10)

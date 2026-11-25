@@ -77,7 +77,7 @@ class RiskAssessment(Base):
     mode: Mapped[str] = mapped_column(String(16), nullable=False)
     rule_score: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     model_score: Mapped[float | None] = mapped_column(Double)
-    model_version_id: Mapped[uuid.UUID | None] = mapped_column()  # FK added in Phase 6
+    model_version_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("model_versions.id"))
     risk_score: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     risk_category: Mapped[str] = mapped_column(String(16), nullable=False)
     force_alert: Mapped[bool] = mapped_column(Boolean, nullable=False)

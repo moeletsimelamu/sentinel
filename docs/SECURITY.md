@@ -1,6 +1,6 @@
 # Sentinel — Security
 
-> Status: Phase 5 (synthetic data). Updated as each phase adds attack surface; finalised in Phase 10.
+> Status: Phase 6 (models). Updated as each phase adds attack surface; finalised in Phase 10.
 > Sentinel is an educational simulation using synthetic data. It holds no real customer, card or banking data.
 
 ## Reporting
@@ -66,6 +66,17 @@ This is a portfolio project. Please report security issues privately to the repo
 | Reproducibility | Dataset card records generator version, profile hash, seed and SHA-256 of every file; identical inputs reproduce identical bytes | `dataset_card.json` |
 | Data in git | Generated datasets are git-ignored (`data/`); only the generator and seed are committed | `.gitignore` |
 
+## Controls implemented (Phase 6 — models)
+
+| Area | Control | Where |
+|---|---|---|
+| Untrusted pickles | Model artefacts (joblib = pickle) are never uploaded over HTTP. Registration is a CLI step that verifies the feature-schema hash, feature names and the artefact SHA-256 **without unpickling**; loading for inference (Phase 7) re-verifies the hash first | `modules/models/service.py`, `ml/sentinel_ml/train/artefacts.py` |
+| Path confinement | Registration only accepts folders inside `SENTINEL_MODELS_DIR`; artefact paths may not escape their folder (tested) | `modules/models/service.py` |
+| Read-only artefacts | `./models` is mounted read-only into the API and worker containers | `docker-compose.yml` |
+| Immutable evaluation history | `model_evaluations` is append-only (trigger); at most one model can be `active` (partial unique index) | migration `0004` |
+| Audit | `model.registered` with version, family, hash and training dataset | `modules/models/service.py` |
+| No sensitive inputs | Model inputs exclude identifiers, labels, generator segment and protected attributes (tested in `ml` and backend) | `sentinel/features/model_input.py` |
+
 ## Known limitations / planned work
 
 | Item | Plan |
@@ -78,6 +89,7 @@ This is a portfolio project. Please report security issues privately to the repo
 | `starlette.testclient` warns that `httpx` support is deprecated in favour of `httpx2` | Test-only dependency; revisit when pinning versions in Phase 10 |
 | JSON request bodies (e.g. `POST /transactions`) have no byte limit in the app; only the record count is limited | Phase 10: request-size limit at a reverse proxy or ASGI middleware |
 | Uploaded files sit in Postgres (`import_files`) until the worker processes them | Acceptable at simulation scale; deleted after processing |
+| joblib/pickle artefacts can execute code when loaded | Only artefacts produced by `sentinel-ml`, registered with a verified hash, and re-verified at load time are ever loaded (Phase 7) |
 | Card-number detection can reject purely numeric 13–19-digit ids that happen to pass Luhn | Deliberately conservative; documented in DATA_DICTIONARY.md |
 
 ## Data protection

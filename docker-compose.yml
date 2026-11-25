@@ -12,6 +12,9 @@ x-backend: &backend
       required: false
   environment:
     SENTINEL_DATABASE_URL: postgresql+psycopg://sentinel:${POSTGRES_PASSWORD:-sentinel}@db:5432/sentinel
+    SENTINEL_MODELS_DIR: /app/models
+  volumes:
+    - ./models:/app/models:ro   # trained artefacts (git-ignored); read-only in containers
   restart: unless-stopped
 
 services:

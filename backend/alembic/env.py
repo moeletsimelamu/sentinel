@@ -11,6 +11,7 @@ from sentinel.modules.audit import models as _audit_models  # noqa: F401 — reg
 from sentinel.modules.auth import models as _auth_models  # noqa: F401
 from sentinel.modules.ingestion import models as _ingestion_models  # noqa: F401
 from sentinel.modules.jobs import models as _jobs_models  # noqa: F401
+from sentinel.modules.models import models as _model_registry  # noqa: F401
 from sentinel.modules.rules import models as _rules_models  # noqa: F401
 from sentinel.modules.scoring import models as _scoring_models  # noqa: F401
 from sentinel.modules.transactions import models as _transactions_models  # noqa: F401
