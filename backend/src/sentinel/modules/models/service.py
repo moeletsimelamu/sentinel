@@ -111,7 +111,8 @@ def register(
             raise RegistrationError("A different artefact is already registered under this version")
         return existing, False
     artefact = manifest.get("artefact")
-    rel = (folder / artefact).resolve().relative_to(settings.models_dir.resolve()) if artefact else None
+    root = settings.models_dir.resolve()
+    rel = (folder / artefact).resolve().relative_to(root) if artefact else None
     stored_manifest = {k: v for k, v in manifest.items() if k != "tuning_log"}
     model = ModelVersion(
         name=manifest["name"],

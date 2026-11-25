@@ -74,7 +74,8 @@ class ModelVersion(Base):
         ),
         CheckConstraint("status IN ('active', 'registered', 'retired')", name="status_valid"),
         CheckConstraint(
-            "family = 'rules_baseline' OR (artefact_path IS NOT NULL AND artefact_sha256 IS NOT NULL)",
+            "family = 'rules_baseline' OR "
+            "(artefact_path IS NOT NULL AND artefact_sha256 IS NOT NULL)",
             name="artefact_required",
         ),
         Index(
@@ -107,8 +108,6 @@ class ModelEvaluation(Base):
     )
 
     __table_args__ = (
-        CheckConstraint(
-            "split IN ('holdout', 'test', 'validation')", name="split_valid"
-        ),
+        CheckConstraint("split IN ('holdout', 'test', 'validation')", name="split_valid"),
         Index("ix_model_evaluations_model", "model_version_id", "split"),
     )
