@@ -1,6 +1,6 @@
 # Sentinel — Data Dictionary
 
-> Status: Phase 4 (ingestion + behavioural features used by rules). ML-only features are added in Phase 5, model outputs in Phases 6–7.
+> Status: Phase 5 (ingestion, behavioural features `behaviour-v2`, model inputs). Model outputs are added in Phases 6–7.
 > All data is synthetic. Sentinel never accepts real card numbers, bank credentials or personal data.
 
 ## 1. Transaction import format
@@ -86,7 +86,7 @@ CSV upload ─▶ queued ─▶ processing ─┬─▶ completed   (some rows m
 REST request ───────────────────────▶ completed     (synchronous)
 ```
 
-## 5. Behavioural features (`behaviour-v1`, Phase 4)
+## 5. Behavioural features (`behaviour-v2`)
 
 Computed by `sentinel.features.build_feature_rows` for every scored transaction and stored with each risk assessment (`risk_assessments.features`). Windows are `[T − d, T)` over the **same customer's strictly earlier** transactions; `null` means *unknown* (usually: no history yet).
 
@@ -94,16 +94,42 @@ Computed by `sentinel.features.build_feature_rows` for every scored transaction 
 |---|---|
 | `amount`, `currency` | As ingested |
 | `amount_zar` | Amount × fixed illustrative rate (ZAR 1, USD 18, EUR 19.5, GBP 23) |
-| `hour_utc` | Hour of `occurred_at` in UTC |
+| `hour_utc`, `day_of_week` | Hour and weekday (Monday = 0) of `occurred_at`, always in UTC |
+| `channel`, `txn_type` | As ingested |
 | `merchant_category`, `high_risk_category` | Category; whether it is `gift_cards`, `crypto_exchange` or `money_transfer` |
 | `history_count_90d` | Prior transactions in 90 days (any status) |
+| `history_span_days_90d` | Days since the earliest prior transaction in the 90-day window |
+| `secs_since_prev_txn` | Seconds since the previous transaction (within 90 days) |
 | `cust_median_amount_zar_90d` | Median `amount_zar` of prior **completed** transactions in 90 days |
 | `amount_vs_cust_median_90d` | `amount_zar` ÷ that median |
 | `txn_count_1h`, `txn_count_24h`, `txn_count_30d` | Prior transactions in each window (any status) |
 | `velocity_ratio_24h_vs_30d` | `txn_count_24h` ÷ (`txn_count_30d` ÷ 30) |
 | `failed_count_24h` | Prior `declined`/`failed` transactions in 24 h |
 | `same_category_count_10m` | Prior transactions in the same category within 10 min |
+| `spend_sum_24h_zar`, `inflow_sum_24h_zar` | Prior **completed** outgoing amounts / incoming transfers and refunds in 24 h |
 | `km_from_prev_txn`, `implied_speed_kmh` | Haversine distance from the previous transaction that had coordinates; ÷ elapsed hours (at least 1 minute; capped at 20,000 km/h) |
 | `is_new_city_90d`, `is_new_device_90d`, `is_new_category_90d` | Not seen for this customer in the prior 90 days (`null` when the value or the history is missing) |
+| `channel_rarity_cust` | 1 − share of prior-90-day transactions on this channel |
 | `hour_rarity_cust` | 1 − share of prior-90-day transactions within ±1 hour of this hour |
 | `category_share_shift_7d_vs_90d` | Jensen–Shannon distance (0–1) between the category mix of the last 7 days (including this transaction) and the prior 90 days |
+
+`behaviour-v1` (Phase 4) is the same table without `day_of_week`, `channel`, `txn_type`, `history_span_days_90d`, `secs_since_prev_txn`, the 24 h sums and `channel_rarity_cust`. Each assessment records the feature-set version it used.
+
+## 6. Model inputs (`sentinel.features.MODEL_FEATURES`)
+
+`to_model_vector(row, reference)` turns a feature row into 34 floats in a fixed order identified by `FEATURE_SCHEMA_HASH` (recorded in each dataset card and, from Phase 6, each model manifest). Encoding rules:
+
+- Heavy-tailed values are log-transformed (`log_amount_zar`, `log_amount_vs_cust_median_90d`, velocity ratio, 24 h sums, distance, speed, seconds since previous).
+- Unknowns are explicit: "is new" flags are 1 / 0 / -1 (unknown); rarities, shift, distance and speed are -1 when unknown; `has_history` tells a model how far to trust behavioural ratios.
+- Cold start: with no customer median, amounts are compared with the **training-split** population median (`feature_reference.json`); `amount_vs_category_p95` uses training-split category 95th percentiles.
+- Hour is encoded as `hour_sin` / `hour_cos`; channel is one-hot; `is_transfer_out` and `outflow_vs_inflow_24h` describe pass-through behaviour.
+
+Never model inputs (tested): labels (`is_fraud*`, `typology`, `scenario_id`), the generator's `segment`, customer or transaction identifiers, and protected attributes (none exist).
+
+## 7. Generated datasets (evaluation files)
+
+| File | Contents | Used by |
+|---|---|---|
+| `labels.parquet` | `is_fraud_injected` (ground truth), `is_fraud_labelled` (observed; some episodes left unlabelled), `typology`, `scenario_id`, `benign_scenario` | Offline training/evaluation only; never ingested |
+| `customers.parquet` | `segment`, `home_city`, benign flags | Analysis only; never ingested, never a model input |
+| `splits.parquet` | `train` / `validation` / `test` / `holdout` / `excluded` per transaction | Training and evaluation |

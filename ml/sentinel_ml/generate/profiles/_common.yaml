@@ -1,0 +1,22 @@
+# Shared settings; each profile overrides what it needs.
+start: "2026-01-05"            # a Monday
+fraud_episodes_per_customer_month: 0.02
+label_noise: 0.05              # share of injected episodes left unlabelled ("undiscovered")
+holdout_customer_share: 0.10   # customers excluded from training entirely
+split: {train: 0.60, validation: 0.20}   # by time; the remainder is test
+benign:
+  trips_per_month_traveller: 0.6
+  trips_per_month_other: 0.04
+  big_ticket: 0.08
+  new_phone: 0.15
+  shift_worker: 0.04
+  payday_splurge: 0.10
+typology_weights:
+  account_takeover: 0.18
+  card_testing: 0.14
+  impossible_travel: 0.12
+  high_risk_category_shift: 0.15
+  night_drain: 0.12
+  mule_passthrough: 0.10
+  low_and_slow: 0.19
+malformed_rows: true           # append deliberately invalid rows to the ingestion CSV

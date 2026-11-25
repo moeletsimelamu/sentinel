@@ -14,7 +14,8 @@ Sentinel ingests synthetic financial transactions, scores them with configurable
 | 2 — Backend foundation, database, authentication | ✅ Complete |
 | 3 — Ingestion & validation | ✅ Complete |
 | 4 — Rule-based detection | ✅ Complete |
-| 5–10 | Not started |
+| 5 — Synthetic data & feature engineering | ✅ Complete |
+| 6–10 | Not started |
 
 ## Design documents
 
@@ -50,7 +51,7 @@ docker compose exec -e SENTINEL_DEMO_PASSWORD=Sentinel-Demo-2026! api python -m 
 
 ### Import transactions
 
-A sample file with deliberately malformed rows is in `backend/tests/fixtures/transactions_malformed.csv` (the synthetic data generator arrives in Phase 5). Upload it as an analyst, then read the summary and the rejected-record report:
+A small sample with deliberately malformed rows is in `backend/tests/fixtures/transactions_malformed.csv`; a full synthetic dataset can be generated (see below). Upload a file as an analyst, then read the summary and the rejected-record report:
 
 ```powershell
 $token = (Invoke-RestMethod -Method Post -Uri http://localhost:8088/api/v1/auth/login -ContentType application/json -Body '{"email":"analyst@sentinel.local","password":"Sentinel-Demo-2026!"}').access_token
@@ -83,6 +84,14 @@ Invoke-RestMethod -Uri "http://localhost:8088/api/v1/transactions/$($txn.id)/ass
 ```
 
 Admins tune rules with `POST /api/v1/rules/{code}/versions` (new version + new rule set, audited); analysts re-score an import with `POST /api/v1/detection/runs`. See [RISK_RULES.md](docs/RISK_RULES.md).
+
+### Synthetic data
+
+```powershell
+cd ml; python -m uv sync --python 3.12; .\.venv\Scripts\sentinel-ml.exe generate --profile demo --seed 42 --out ..\data
+```
+
+Writes `data/demo-1.0.0-42/` (about 97k transactions, git-ignored) with a dataset card. Upload `ingest/transactions_part_001.csv` with the import command above to load it into the app; the labels stay in `labels.parquet` and are never ingested. The exploration notebook is `ml/notebooks/01_eda_outliers.ipynb`.
 
 ### Backend tests
 

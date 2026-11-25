@@ -1,6 +1,6 @@
 # Sentinel — Synthetic Data & Feature Pipeline
 
-> Phase 1 design. Implementation in Phases 3 (validation) and 5 (generator, features, dataset versioning).
+> Phase 1 design, **implemented in Phases 3 (validation), 4 (behavioural features) and 5 (generator, splits, model inputs)**. See section 7 for what was built and where it differs from the plan.
 
 ## 1. Why synthetic, and what that means for results
 
@@ -143,3 +143,36 @@ New customers have no history. Behavioural ratios fall back to population refere
 ## 6. Dataset versioning
 
 Every training run records `dataset_version`, the generator config hash, split boundaries, and per-split row/fraud counts in the model manifest and in `model_evaluations`. Datasets are regenerated, not committed — the seed and config are the source of truth.
+
+## 7. Implementation (Phase 5)
+
+| Piece | Where |
+|---|---|
+| Profiles (`tiny` for tests, `demo` ≈ 97k txns / 2k customers / 90 days, `full` ≈ 6k customers / 180 days) | `ml/sentinel_ml/generate/profiles/*.yaml` |
+| Customers, legitimate activity, benign anomalies | `ml/sentinel_ml/generate/simulate.py` |
+| Fraud typologies | `ml/sentinel_ml/generate/fraud.py` |
+| Deterministic orchestration (`SeedSequence`, one child stream per customer) | `ml/sentinel_ml/generate/generator.py` |
+| Splits (time-based, whole episodes, customer-disjoint holdout) | `ml/sentinel_ml/datasets/split.py` |
+| Offline features via the backend's `sentinel.features` | `ml/sentinel_ml/datasets/features.py` |
+| Model-input vector, schema hash, train-only reference statistics | `backend/src/sentinel/features/model_input.py` |
+| Writer + dataset card | `ml/sentinel_ml/datasets/build.py` |
+| EDA / outlier notebook (executed, with outputs) | `ml/notebooks/01_eda_outliers.ipynb` (source: `make_eda_notebook.py`) |
+
+```powershell
+cd ml; python -m uv sync --python 3.12; .\.venv\Scripts\sentinel-ml.exe generate --profile demo --seed 42 --out ..\data
+```
+
+Output: `data/demo-1.0.0-42/` with `transactions.parquet`, `labels.parquet`, `customers.parquet`, `episodes.parquet`, `splits.parquet`, `features.parquet`, `feature_reference.json`, `ingest/transactions_part_NNN.csv` (at most 100k rows each, labels excluded, ten deliberately malformed rows appended to part 1) and `dataset_card.md/json` with SHA-256 hashes. Re-running with the same profile, seed and generator version reproduces every file byte for byte (tested).
+
+**Demo dataset (`demo-1.0.0-42`):** 97,151 transactions, 0.67% injected fraud in 120 episodes (4 left unlabelled), 3,133 benign-anomaly transactions; train 53,079 / validation 16,171 / test 18,637 / holdout 9,212 / excluded 52.
+
+**Differences from the Phase 1 plan**
+
+- Activity rates were calibrated down after a first run produced ~300k rows for the demo profile (fraud share 0.3%); the demo now matches the ~80-100k design target and the 0.6-1.0% fraud share.
+- Fraud episodes start at least 14 days into the timeline so victims have history; every typology is guaranteed at least one episode.
+- Label noise flips **whole episodes** (an undiscovered episode is undiscovered in full), not individual transactions.
+- Boundary-crossing episodes: transactions after the split boundary are marked `excluded` instead of being moved, so splits stay strictly time-ordered.
+- Features stay pure Python (Phase 4 decision). Every window is at most 90 days, so the worker, which loads only 90 days of history, computes exactly what training computes over full history; a database-backed parity test asserts this. Calendar fields are normalised to UTC and window sums are recomputed rather than updated incrementally so both paths are bit-identical.
+- `amount_zscore_cust_90d` was dropped as redundant with `amount_vs_cust_median_90d`; `amount_sum_24h` became `spend_sum_24h_zar` plus `inflow_sum_24h_zar` (the latter needed for mule pass-through).
+
+**Findings from the EDA notebook (demo dataset):** no model input separates the classes on its own (best single-feature AUC about 0.77, `channel_online`); 74% of amount outliers are benign travel and the fraud outliers are tiny card-testing probes; about 16% of legitimate transactions are at least 3x the customer's median; `low_and_slow` shows almost none of the behavioural signals.

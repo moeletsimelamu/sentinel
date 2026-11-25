@@ -1,0 +1,3 @@
+# Seeds the running application (~80k transactions).
+n_customers: 2000
+days: 90

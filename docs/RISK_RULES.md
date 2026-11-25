@@ -51,5 +51,6 @@ Score contribution: `rule_component = min(rule_cap, Σ weights)` with `rule_cap 
 - `low_and_slow` fraud is expected to trigger almost nothing.
 - Hour-of-day rarity uses UTC. Because it compares a customer with their own history it is unaffected by a fixed timezone offset, but it would be confused by a customer who changes timezone.
 - `NEW_LOCATION_HIGH_VALUE` and `NEW_DEVICE_HIGH_VALUE` will fire on legitimate travel and new phones — this is the false-positive load ML is meant to reduce.
+- **Observed on the demo dataset (Phase 5, all 97,151 transactions, default v1 thresholds):** `BEHAVIOUR_SHIFT` fired on 27.5% of transactions and `LARGE_AMOUNT_RELATIVE` on 6.4%. A 7-day category mix built from a handful of transactions is almost always far from the 90-day mix, so the 0.5 threshold is too loose. These rules will be recalibrated in Phase 6 **on the validation split only** (tuning on all data would leak test information), and the change recorded as a new rule version.
 
 Rule effectiveness (hit rate, precision against analyst outcomes, share of alerts per rule) is reported in the monitoring dashboard.

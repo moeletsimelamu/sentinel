@@ -1,0 +1,62 @@
+[project]
+name = "sentinel-ml"
+version = "0.1.0"
+description = "Sentinel synthetic data generation, datasets and (Phase 6) model training"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # Shared, pure feature code: training and serving use the same implementation.
+    "sentinel",
+    "numpy>=2.3,<3",
+    "pandas>=2.3,<3",
+    "pyarrow>=21,<23",
+    "pyyaml>=6.0.2,<7",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2,<10",
+    "ruff>=0.17,<0.18",
+]
+notebook = [
+    "ipykernel>=7,<8",
+    "nbclient>=0.10,<0.11",
+    "nbformat>=5.10,<6",
+    "matplotlib>=3.10,<4",
+]
+
+[project.scripts]
+sentinel-ml = "sentinel_ml.cli:main"
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.uv.sources]
+sentinel = { path = "../backend", editable = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["sentinel_ml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["notebooks/*.ipynb"]  # generated; its source is make_eda_notebook.py
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "N", "SIM", "RUF", "PTH", "DTZ", "T20"]
+ignore = ["N803", "N806"]  # numpy-style single-letter / capitalised array names
+
+[tool.ruff.lint.isort]
+known-first-party = ["sentinel_ml"]
+known-third-party = ["sentinel"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+"notebooks/**" = ["T20", "E501", "B018"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"

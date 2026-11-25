@@ -1,0 +1,3 @@
+# Training profile (~400k transactions).
+n_customers: 6000
+days: 180

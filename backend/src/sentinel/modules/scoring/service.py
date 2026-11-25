@@ -73,6 +73,7 @@ def _record(t: Transaction) -> TxnRecord:
         lat=t.lat,
         lon=t.lon,
         device_id_hash=t.device_id_hash,
+        txn_type=t.txn_type,
     )
 
 

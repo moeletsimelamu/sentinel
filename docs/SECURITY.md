@@ -1,6 +1,6 @@
 # Sentinel — Security
 
-> Status: Phase 4 (detection). Updated as each phase adds attack surface; finalised in Phase 10.
+> Status: Phase 5 (synthetic data). Updated as each phase adds attack surface; finalised in Phase 10.
 > Sentinel is an educational simulation using synthetic data. It holds no real customer, card or banking data.
 
 ## Reporting
@@ -56,6 +56,15 @@ This is a portfolio project. Please report security issues privately to the repo
 | Concurrent edits | `expected_version` → 409 on stale edits; a transaction-level advisory lock serialises rule-set snapshots | `rules/service.py` |
 | Audit | `rule.version_created` (before/after diff + reason) and `detection.run_requested` | `rules/service.py`, `scoring/service.py` |
 | Wording | Explanations describe unusual activity; a test asserts none contain "fraud" | `tests/unit/test_rules.py` |
+
+## Controls implemented (Phase 5 — synthetic data)
+
+| Area | Control | Where |
+|---|---|---|
+| No personal data | The generator creates behavioural parameters only: no names, dates of birth, genders, ethnicities, nationalities or addresses (tested) | `ml/sentinel_ml/generate/simulate.py` |
+| Ground-truth isolation | Labels and generator metadata live in separate files that are never ingested; the ingestion CSV and feature table contain no label columns (tested) | `ml/sentinel_ml/datasets/build.py` |
+| Reproducibility | Dataset card records generator version, profile hash, seed and SHA-256 of every file; identical inputs reproduce identical bytes | `dataset_card.json` |
+| Data in git | Generated datasets are git-ignored (`data/`); only the generator and seed are committed | `.gitignore` |
 
 ## Known limitations / planned work
 

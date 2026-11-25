@@ -102,7 +102,7 @@ def test_import_is_scored_end_to_end(
         (a,) = assessments(client, analyst, ids[ext_id])
         assert hit_codes(a) == expected, ext_id
         assert a["mode"] == "rules_only" and a["model_score"] is None
-        assert a["feature_set_version"] == "behaviour-v1"
+        assert a["feature_set_version"] == "behaviour-v2"
 
     for d in range(1, 13):
         (a,) = assessments(client, analyst, ids[f"H{d:02d}"])

@@ -19,15 +19,16 @@ import uuid
 from collections import Counter, deque
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sentinel.core.vocabulary import FX_TO_ZAR, HIGH_RISK_CATEGORIES, TxnStatus
+from sentinel.core.vocabulary import FX_TO_ZAR, HIGH_RISK_CATEGORIES, TxnStatus, TxnType
 
-FEATURE_SET_VERSION = "behaviour-v1"
+FEATURE_SET_VERSION = "behaviour-v2"
 
 FAILED_STATUSES = frozenset({TxnStatus.DECLINED.value, TxnStatus.FAILED.value})
 HIGH_RISK = frozenset(c.value for c in HIGH_RISK_CATEGORIES)
+INFLOW_TYPES = frozenset({TxnType.TRANSFER_IN.value, TxnType.REFUND.value})
 MIN_ELAPSED_HOURS = 1 / 60  # one minute: avoids infinite speeds for near-simultaneous events
 MAX_SPEED_KMH = 20_000.0
 EARTH_RADIUS_KM = 6371.0088
@@ -56,6 +57,11 @@ class TxnRecord:
     lat: float | None
     lon: float | None
     device_id_hash: str | None
+    txn_type: str = TxnType.PURCHASE.value
+
+    @property
+    def is_inflow(self) -> bool:
+        return self.txn_type in INFLOW_TYPES
 
     @property
     def amount_zar(self) -> float:
@@ -71,10 +77,15 @@ class FeatureRow:
     currency: str
     amount_zar: float
     hour_utc: int
+    day_of_week: int  # Monday = 0 (UTC)
     merchant_category: str
+    channel: str
+    txn_type: str
     high_risk_category: bool
     # history (prior 90 days unless stated)
     history_count_90d: int
+    history_span_days_90d: float | None  # days since the earliest txn in the window
+    secs_since_prev_txn: float | None
     cust_median_amount_zar_90d: float | None  # completed transactions only
     amount_vs_cust_median_90d: float | None
     # velocity (prior transactions, any status)
@@ -84,6 +95,8 @@ class FeatureRow:
     velocity_ratio_24h_vs_30d: float | None
     failed_count_24h: int
     same_category_count_10m: int
+    spend_sum_24h_zar: float  # prior completed outgoing amounts
+    inflow_sum_24h_zar: float  # prior completed incoming transfers/refunds
     # geography
     km_from_prev_txn: float | None
     implied_speed_kmh: float | None
@@ -91,6 +104,7 @@ class FeatureRow:
     # device / behaviour
     is_new_device_90d: bool | None
     is_new_category_90d: bool | None
+    channel_rarity_cust: float | None  # 1 - share of prior 90d txns on this channel
     hour_rarity_cust: float | None
     category_share_shift_7d_vs_90d: float | None
 
@@ -98,6 +112,11 @@ class FeatureRow:
         out = asdict(self)
         out["transaction_id"] = str(self.transaction_id)
         return out
+
+
+def _utc(t: TxnRecord) -> datetime:
+    """Calendar fields (hour, weekday) always in UTC, whatever timezone the source used."""
+    return t.occurred_at.astimezone(UTC)
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -153,6 +172,7 @@ class _CustomerState:
         self.cities_90d: Counter[str] = Counter()
         self.devices_90d: Counter[str] = Counter()
         self.hours_90d: Counter[int] = Counter()
+        self.channels_90d: Counter[str] = Counter()
         self.failed_24h = 0
         self.completed_amounts_90d: list[float] = []  # kept sorted for the median
         self.last_located: tuple[datetime, float, float] | None = None  # (time, lat, lon)
@@ -167,7 +187,8 @@ class _CustomerState:
             self.cities_90d[t.city.casefold()] += 1
         if t.device_id_hash:
             self.devices_90d[t.device_id_hash] += 1
-        self.hours_90d[t.occurred_at.hour] += 1
+        self.hours_90d[_utc(t).hour] += 1
+        self.channels_90d[t.channel] += 1
         if t.status in FAILED_STATUSES:
             self.failed_24h += 1
         if t.status == TxnStatus.COMPLETED:
@@ -191,7 +212,8 @@ class _CustomerState:
                 _dec(self.cities_90d, t.city.casefold())
             if t.device_id_hash:
                 _dec(self.devices_90d, t.device_id_hash)
-            _dec(self.hours_90d, t.occurred_at.hour)
+            _dec(self.hours_90d, _utc(t).hour)
+            _dec(self.channels_90d, t.channel)
             if t.status == TxnStatus.COMPLETED:
                 i = bisect.bisect_left(self.completed_amounts_90d, t.amount_zar)
                 del self.completed_amounts_90d[i]
@@ -217,7 +239,7 @@ class _CustomerState:
             hours = max((t.occurred_at - prev_at).total_seconds() / 3600, MIN_ELAPSED_HOURS)
             speed = min(km / hours, MAX_SPEED_KMH)
 
-        hour = t.occurred_at.hour
+        hour = _utc(t).hour
         rarity = None
         if has_history:
             near = sum(self.hours_90d[(hour + d) % 24] for d in (-1, 0, 1))
@@ -229,15 +251,33 @@ class _CustomerState:
             recent[t.merchant_category] += 1  # recent behaviour includes this transaction
             shift = js_distance(recent, self.categories_90d)
 
+        # Summed afresh in time order (not maintained incrementally) so the result is
+        # bit-identical however much older history was loaded.
+        completed_24h = [x for x in self.w24h.items if x.status == TxnStatus.COMPLETED]
+        spend_24h = sum(x.amount_zar for x in completed_24h if not x.is_inflow)
+        inflow_24h = sum(x.amount_zar for x in completed_24h if x.is_inflow)
+
+        span = secs_prev = channel_rarity = None
+        if has_history:
+            window = self.w90d.items
+            span = (t.occurred_at - window[0].occurred_at).total_seconds() / 86400
+            secs_prev = (t.occurred_at - window[-1].occurred_at).total_seconds()
+            channel_rarity = 1 - self.channels_90d[t.channel] / history
+
         return FeatureRow(
             transaction_id=t.id,
             amount=t.amount,
             currency=t.currency,
             amount_zar=t.amount_zar,
             hour_utc=hour,
+            day_of_week=_utc(t).weekday(),
             merchant_category=t.merchant_category,
+            channel=t.channel,
+            txn_type=t.txn_type,
             high_risk_category=t.merchant_category in HIGH_RISK,
             history_count_90d=history,
+            history_span_days_90d=span,
+            secs_since_prev_txn=secs_prev,
             cust_median_amount_zar_90d=median,
             amount_vs_cust_median_90d=(t.amount_zar / median) if median else None,
             txn_count_1h=len(self.w1h),
@@ -246,6 +286,8 @@ class _CustomerState:
             velocity_ratio_24h_vs_30d=(count_24h / (count_30d / 30)) if count_30d else None,
             failed_count_24h=self.failed_24h,
             same_category_count_10m=self.categories_10m[t.merchant_category],
+            spend_sum_24h_zar=spend_24h,
+            inflow_sum_24h_zar=inflow_24h,
             km_from_prev_txn=km,
             implied_speed_kmh=speed,
             is_new_city_90d=(
@@ -259,6 +301,7 @@ class _CustomerState:
             is_new_category_90d=(
                 (t.merchant_category not in self.categories_90d) if has_history else None
             ),
+            channel_rarity_cust=channel_rarity,
             hour_rarity_cust=rarity,
             category_share_shift_7d_vs_90d=shift,
         )
