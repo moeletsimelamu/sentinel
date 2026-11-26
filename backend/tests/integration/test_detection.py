@@ -11,11 +11,12 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from sentinel.core.config import get_settings
 from sentinel.core.permissions import Role
 from sentinel.detection.rules import CATALOGUE
+from sentinel.modules.alerts import jobs as alert_jobs
 from sentinel.modules.audit.models import AuditLog
 from sentinel.modules.rules.models import RuleDefinition, RuleVersion
-from sentinel.modules.scoring import service as scoring
 from tests.conftest import AuthHeaders
 from tests.integration.test_ingestion import HEADER, run_worker
 
@@ -128,7 +129,9 @@ def test_assessment_content_is_explainable(
 
 
 def test_scoring_is_idempotent_on_retry(scored: dict[str, Any], db: Session) -> None:
-    summary = scoring.process_score_batch(db, {"batch_id": scored["batch"]["id"]})
+    summary = alert_jobs.process_score_batch(
+        db, get_settings(), {"batch_id": scored["batch"]["id"]}
+    )
     assert summary["assessed"] == 0
 
 

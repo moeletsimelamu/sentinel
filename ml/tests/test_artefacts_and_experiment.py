@@ -114,3 +114,31 @@ def test_experiment_runs_end_to_end_and_reproducibly(built: BuiltDataset, tmp_pa
         verify(Path(a["artefacts"][family]["path"]))
     selected = a["selection"]["selected"]
     assert selected in a["validation"] and selected != "rules_v1"
+
+
+@pytest.mark.parametrize("family", ["logreg", "random_forest", "isolation_forest"])
+def test_backend_loader_accepts_ml_artefacts(data, tmp_path: Path, family: str) -> None:  # type: ignore[no-untyped-def]
+    """Contract: what sentinel-ml saves, the application's verified loader can use."""
+    from sentinel.inference import load_model
+
+    tr, va = data.splits["train"], data.splits["validation"]
+    if family == "isolation_forest":
+        fitted = candidates.fit_isolation_forest(tr, seed=0)
+    else:
+        params = {"C": 0.1} if family == "logreg" else {"max_depth": 4, "min_samples_leaf": 5}
+        fitted = candidates.fit_supervised(family, params, tr, va, seed=0)
+    sm = save_model(
+        fitted, tmp_path, dataset_version=data.version, reference=data.reference.to_dict(),
+        drift=drift_reference(tr.X, fitted.score(tr.X)), thresholds={}, metrics={}, selected=False,
+    )  # fmt: skip
+    model = load_model(
+        sm.folder, expected_sha256=sm.manifest["artefact_sha256"], version=sm.manifest["version"]
+    )
+    rows = data.splits["test"].rows()[:25]
+    scores = model.predict(rows)
+    expected = fitted.score(data.splits["test"].X.iloc[:25])
+    assert np.allclose(scores, expected)  # same numbers in training and serving
+    explained = model.explain(rows[:3])
+    assert len(explained) == 3
+    if family != "isolation_forest":
+        assert all(len(e) > 0 for e in explained)

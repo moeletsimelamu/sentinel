@@ -16,7 +16,8 @@ Sentinel ingests synthetic financial transactions, scores them with configurable
 | 4 — Rule-based detection | ✅ Complete |
 | 5 — Synthetic data & feature engineering | ✅ Complete |
 | 6 — ML experimentation & evaluation | ✅ Complete |
-| 7–10 | Not started |
+| 7 — Risk scoring & alerts | ✅ Complete |
+| 8–10 | Not started |
 
 ## Design documents
 
@@ -108,6 +109,24 @@ docker compose exec api python -m sentinel.cli register-models
 ```
 
 Compare them at `GET /api/v1/models`. Results and the selected model are described in the [model card](docs/MODEL_CARD.md).
+
+### Alerts and model-based scoring
+
+```powershell
+$admin = (Invoke-RestMethod -Method Post -Uri http://localhost:8088/api/v1/auth/login -ContentType application/json -Body '{"email":"admin@sentinel.local","password":"Sentinel-Demo-2026!"}').access_token
+```
+
+Activate the model selected in Phase 6 (its hash and feature schema are re-verified before the switch):
+
+```powershell
+$rf = (Invoke-RestMethod -Uri http://localhost:8088/api/v1/models -Headers @{ Authorization = "Bearer $admin" }) | Where-Object selected_by_experiment
+```
+
+```powershell
+Invoke-RestMethod -Method Post -Uri "http://localhost:8088/api/v1/models/$($rf.id)/activate" -ContentType application/json -Body '{"reason":"Selected on validation in Phase 6"}' -Headers @{ Authorization = "Bearer $admin" }
+```
+
+From then on every scored transaction gets a combined rules + model score with explanations, and alerts appear in `GET /api/v1/alerts` (open alerts, highest priority first). Analysts work them with `POST /api/v1/alerts/{id}/claim`, `/start`, `/close` (resolution reason + findings) and `/notes`; lead analysts `/assign` and `/reopen`. Each action sends the alert's current `version`; a stale one returns 409.
 
 ### Backend tests
 

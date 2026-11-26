@@ -1,5 +1,5 @@
-"""Read-only model registry API. Registration is a CLI operation (no artefact uploads over
-HTTP); activation arrives with model-based scoring in Phase 7."""
+"""Model registry API. Registration is a CLI operation (no artefact uploads over HTTP);
+activation and deactivation are audited admin actions (``models:activate``)."""
 
 from __future__ import annotations
 
@@ -8,15 +8,24 @@ import uuid
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from sentinel.core.config import Settings, get_settings
 from sentinel.core.db import get_db
 from sentinel.core.permissions import Permission
+from sentinel.modules.audit.context import RequestContext, get_request_context
 from sentinel.modules.auth.dependencies import RequirePermission
+from sentinel.modules.auth.schemas import Principal
 from sentinel.modules.models import service
 from sentinel.modules.models.models import ModelVersion
-from sentinel.modules.models.schemas import EvaluationOut, ModelDetail, ModelSummary
+from sentinel.modules.models.schemas import (
+    ActivationRequest,
+    EvaluationOut,
+    ModelDetail,
+    ModelSummary,
+)
 
 router = APIRouter(prefix="/models", tags=["models"])
 _read = RequirePermission(Permission.MODELS_READ)
+_activate = RequirePermission(Permission.MODELS_ACTIVATE)
 
 
 def _headline(model: ModelVersion) -> dict[str, float | None]:
@@ -54,7 +63,10 @@ def list_models(db: Session = Depends(get_db)) -> list[ModelSummary]:
 
 @router.get("/{model_id}", response_model=ModelDetail, dependencies=[Depends(_read)])
 def get_model(model_id: uuid.UUID, db: Session = Depends(get_db)) -> ModelDetail:
-    model = service.get_model(db, model_id)
+    return get_model_detail(service.get_model(db, model_id))
+
+
+def get_model_detail(model: ModelVersion) -> ModelDetail:
     m = model.manifest
     return ModelDetail(
         **_summary(model).model_dump(),
@@ -69,3 +81,28 @@ def get_model(model_id: uuid.UUID, db: Session = Depends(get_db)) -> ModelDetail
         recommended_rule_changes=m.get("recommended_changes"),
         evaluations=[EvaluationOut.model_validate(e) for e in model.evaluations],
     )
+
+
+@router.post("/{model_id}/activate", response_model=ModelDetail)
+def activate_model(
+    model_id: uuid.UUID,
+    body: ActivationRequest,
+    by: Principal = Depends(_activate),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+    ctx: RequestContext = Depends(get_request_context),
+) -> ModelDetail:
+    """Use this model for scoring from the next batch on (hash and schema re-verified)."""
+    return get_model_detail(service.activate(db, settings, model_id, body.reason, by, ctx))
+
+
+@router.post("/{model_id}/deactivate", response_model=ModelDetail)
+def deactivate_model(
+    model_id: uuid.UUID,
+    body: ActivationRequest,
+    by: Principal = Depends(_activate),
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context),
+) -> ModelDetail:
+    """Return to rules-only scoring."""
+    return get_model_detail(service.deactivate(db, model_id, body.reason, by, ctx))

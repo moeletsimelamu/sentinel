@@ -89,9 +89,11 @@ The full field list and validation rules are in [DATA_DICTIONARY.md](DATA_DICTIO
 ### Alerts
 | Table | Key columns | Notes |
 |---|---|---|
-| `alerts` | id, reference (`ALR-000123`), customer_id, primary_assessment_id, severity, priority_score, status, assignee_id, case_id, resolution_reason, opened_at, closed_at, version | `version` for optimistic locking |
-| `alert_transactions` | alert_id, transaction_id, assessment_id | An open alert absorbs further hits for the same customer within 24h |
-| `alert_events` | id, alert_id, actor_id, event_type, from_status, to_status, payload jsonb, created_at | Append-only; includes notes |
+| `alerts` | id, reference (`ALR-000123`, from sequence `alert_reference_seq`), customer_id, primary_assessment_id, severity, priority_score, status, assignee_id, case_id (FK in Phase 8), resolution_reason, transaction_count, last_activity_at, opened_at, closed_at, updated_at, version | Phase 7. `version` for optimistic locking. CHECKs: terminal statuses (`closed`, `escalated`) ⇔ resolution and `closed_at` present; `assigned`/`in_review` require an assignee |
+| `alert_transactions` | alert_id, transaction_id (**unique**), assessment_id, linked_at | **Append-only.** A transaction belongs to at most one alert. An open alert absorbs further alertable transactions of the same customer within 24 h of its latest activity |
+| `alert_events` | id, alert_id, actor_id (null = system), event_type (`created`, `transaction_linked`, `claimed`, `assigned`, `review_started`, `closed`, `reopened`, `note`), from_status, to_status, payload jsonb, created_at | **Append-only**; notes are events, corrections are new notes referencing the original |
+
+`risk_assessments.contributions` (jsonb, Phase 7) stores the top model feature contributions for explained assessments.
 
 ### Investigations
 | Table | Key columns | Notes |

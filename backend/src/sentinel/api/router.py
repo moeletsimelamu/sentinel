@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from sentinel.api import health
+from sentinel.modules.alerts.router import router as alerts_router
 from sentinel.modules.audit.router import router as audit_router
 from sentinel.modules.auth.router import auth_router, users_router
 from sentinel.modules.ingestion.router import imports_router, ingest_router
@@ -14,6 +15,7 @@ from sentinel.modules.scoring.router import (
     assessments_router,
     detection_router,
     scoring_config_router,
+    scoring_configs_router,
 )
 from sentinel.modules.transactions.router import router as transactions_router
 
@@ -29,5 +31,7 @@ api_router.include_router(assessments_router)
 api_router.include_router(rules_router)
 api_router.include_router(rule_sets_router)
 api_router.include_router(scoring_config_router)
+api_router.include_router(scoring_configs_router)
 api_router.include_router(detection_router)
 api_router.include_router(models_router)
+api_router.include_router(alerts_router)

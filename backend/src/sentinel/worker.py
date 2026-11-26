@@ -22,12 +22,12 @@ from sqlalchemy.orm import Session
 from sentinel.core.config import Settings, get_settings
 from sentinel.core.db import get_session_factory
 from sentinel.core.logging import configure_logging, get_logger
+from sentinel.modules.alerts import jobs as alert_jobs
 from sentinel.modules.auth import models as _auth_models  # noqa: F401 - FK targets
 from sentinel.modules.ingestion import service as ingestion
 from sentinel.modules.jobs import kinds
 from sentinel.modules.jobs import service as jobs
 from sentinel.modules.jobs.models import JobStatus
-from sentinel.modules.scoring import service as scoring
 
 log = get_logger("sentinel.worker")
 
@@ -49,7 +49,11 @@ def default_handlers(settings: Settings) -> dict[str, JobHandler]:
             handle=lambda db, payload, _job_id: ingestion.process_csv_batch(db, settings, payload),
             on_dead=ingestion.fail_csv_batch,
         ),
-        kinds.SCORE_BATCH: JobHandler(handle=scoring.process_score_batch),
+        kinds.SCORE_BATCH: JobHandler(
+            handle=lambda db, payload, job_id: alert_jobs.process_score_batch(
+                db, settings, payload, job_id
+            ),
+        ),
     }
 
 

@@ -88,6 +88,8 @@ class RiskAssessment(Base):
     feature_set_version: Mapped[str] = mapped_column(String(32), nullable=False)
     features: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     reasons: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    # Model feature contributions (top-k), for assessments that were explained.
+    contributions: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     job_id: Mapped[uuid.UUID | None] = mapped_column()  # no FK: jobs may be pruned
     assessed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

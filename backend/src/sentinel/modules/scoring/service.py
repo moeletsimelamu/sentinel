@@ -1,6 +1,7 @@
 """Score transactions: features → rules → risk assessment (append-only).
 
-Phase 4 runs in rules-only mode; Phase 7 adds the model component and alert policy.
+Uses the active model when one is activated (combined mode), otherwise rules only.
+Alerts are raised from the returned outcome by the alerts module.
 Scoring loads, for every customer in the batch, all of their transactions from 90 days
 before the earliest target up to the latest target, so features see the full prior
 history even when it came from other imports.
@@ -11,19 +12,22 @@ from __future__ import annotations
 import uuid
 from collections import Counter
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import exists, insert, select
+from sqlalchemy import exists, func, insert, select, text
 from sqlalchemy.orm import Session
 
 from sentinel.core.config import Settings
-from sentinel.core.errors import NotFoundError
+from sentinel.core.errors import ConflictError, NotFoundError, ValidationFailedError
 from sentinel.core.ids import uuid7
 from sentinel.core.logging import get_logger
 from sentinel.detection.engine import evaluate
 from sentinel.detection.risk import Band, ScoringSpec, combine
 from sentinel.features.behaviour import FEATURE_SET_VERSION, W_90D, TxnRecord, build_feature_rows
+from sentinel.inference import Contribution, LoadedModel, ModelLoadError, load_model
+from sentinel.inference.labels import model_reason
 from sentinel.modules.audit import service as audit
 from sentinel.modules.audit.context import Actor, RequestContext
 from sentinel.modules.auth.schemas import Principal
@@ -31,12 +35,15 @@ from sentinel.modules.ingestion.models import ImportBatch
 from sentinel.modules.jobs import kinds
 from sentinel.modules.jobs import service as jobs
 from sentinel.modules.jobs.models import ProcessingJob
+from sentinel.modules.models.models import ModelStatus, ModelVersion
 from sentinel.modules.rules import service as rules
 from sentinel.modules.scoring.models import RiskAssessment, RuleHitRow, ScoringConfig
+from sentinel.modules.scoring.schemas import ScoringConfigChange
 from sentinel.modules.transactions.models import Transaction
 
 log = get_logger(__name__)
 CHUNK = 1000
+MAX_EXPLAINED = 5000  # explanations cost ~3 ms each; bounded per batch
 
 
 def active_scoring_config(db: Session) -> ScoringConfig:
@@ -94,43 +101,121 @@ def _load_history(db: Session, targets: Sequence[Transaction]) -> list[TxnRecord
     return history
 
 
+@dataclass(frozen=True)
+class Assessed:
+    """What the alert policy needs to know about one new assessment."""
+
+    transaction: Transaction
+    assessment_id: uuid.UUID
+    risk_score: int
+    risk_category: str
+    force_alert: bool
+    alertable: bool
+
+
+@dataclass
+class ScoringOutcome:
+    summary: dict[str, Any]
+    assessed: list[Assessed] = field(default_factory=list)
+
+
+_MODEL_CACHE: dict[uuid.UUID, LoadedModel] = {}
+
+
+def active_model(db: Session) -> ModelVersion | None:
+    return db.scalar(select(ModelVersion).where(ModelVersion.status == ModelStatus.ACTIVE))
+
+
+def load_registered(settings: Settings, model: ModelVersion) -> LoadedModel:
+    """Load (and cache) a registered model, re-verifying its hash against the registry."""
+    cached = _MODEL_CACHE.get(model.id)
+    if cached is not None:
+        return cached
+    if not model.artefact_path or not model.artefact_sha256:
+        raise ModelLoadError("This model version has no artefact")
+    folder = (settings.models_dir / model.artefact_path).parent
+    loaded = load_model(folder, expected_sha256=model.artefact_sha256, version=model.version)
+    _MODEL_CACHE.clear()  # keep only the model in use
+    _MODEL_CACHE[model.id] = loaded
+    return loaded
+
+
+def explanation_floor(spec: ScoringSpec) -> int:
+    """Explain everything in the band just below the alert threshold and above."""
+    below = [b.min_score for b in spec.bands if b.min_score < spec.alert_threshold]
+    return max(below) if below else 0
+
+
 def score_transactions(
     db: Session,
     targets: Sequence[Transaction],
     *,
+    settings: Settings,
     job_id: uuid.UUID | None = None,
     now: datetime | None = None,
-) -> dict[str, Any]:
-    """Assess ``targets`` with the current rule set and active scoring config.
+) -> ScoringOutcome:
+    """Assess ``targets`` with the current rule set, scoring config and active model.
 
-    Runs in the caller's transaction; returns a summary for the job result.
+    With no active model the score is rules-only. Model explanations are computed for
+    transactions at or above the explanation floor or forced to alert. Runs in the
+    caller's transaction.
     """
     if not targets:
-        return {"assessed": 0, "rule_hits": 0, "by_category": {}, "hits_by_rule": {}}
+        return ScoringOutcome(
+            {"assessed": 0, "rule_hits": 0, "by_category": {}, "hits_by_rule": {}}
+        )
     rule_set = rules.current_rule_set(db)
     configured = rules.configured_rules(rule_set)
     cfg = active_scoring_config(db)
     spec = to_spec(cfg)
+    registered = active_model(db)
+    model = load_registered(settings, registered) if registered is not None else None
     rows = build_feature_rows(_load_history(db, targets), {t.id for t in targets})
+    ordered = [rows[t.id] for t in targets]
+    model_scores = model.predict(ordered) if model is not None else None
     now = now or datetime.now(UTC)
+
+    results = []
+    for i, t in enumerate(targets):
+        hits = evaluate(configured, ordered[i])
+        p = float(model_scores[i]) if model_scores is not None else None
+        results.append((t, ordered[i], hits, combine(hits, spec, p)))
+
+    floor = explanation_floor(spec)
+    explain_idx = [
+        i for i, (_, _, _, r) in enumerate(results) if r.force_alert or r.risk_score >= floor
+    ][:MAX_EXPLAINED]
+    explanations: dict[int, list[Contribution]] = {}
+    if model is not None and explain_idx:
+        explained = model.explain([ordered[i] for i in explain_idx])
+        explanations = dict(zip(explain_idx, explained, strict=True))
 
     assessments: list[dict[str, Any]] = []
     hit_rows: list[dict[str, Any]] = []
+    outcome = ScoringOutcome({})
     by_category: Counter[str] = Counter()
     by_rule: Counter[str] = Counter()
-    for t in targets:
-        row = rows[t.id]
-        hits = evaluate(configured, row)
-        result = combine(hits, spec)
+    for i, (t, row, hits, result) in enumerate(results):
         assessment_id = uuid7()
+        reasons = list(result.reasons)
+        contributions = None
+        if model is not None and i in explanations:
+            items = explanations[i]
+            contributions = {
+                "space": model.explanation_space,
+                "items": [c.as_dict() for c in items],
+            }
+            reasons += [
+                model_reason(c.feature, c.contribution) for c in items[:3] if c.contribution > 0
+            ]
         assessments.append(
             {
                 "id": assessment_id,
                 "transaction_id": t.id,
                 "mode": result.mode.value,
                 "rule_score": result.rule_score,
-                "model_score": None,
-                "model_version_id": None,
+                "model_score": result.model_score,
+                "model_version_id": registered.id if registered is not None else None,
                 "risk_score": result.risk_score,
                 "risk_category": result.category,
                 "force_alert": result.force_alert,
@@ -138,7 +223,8 @@ def score_transactions(
                 "rule_set_id": rule_set.id,
                 "feature_set_version": FEATURE_SET_VERSION,
                 "features": row.as_dict(),
-                "reasons": list(result.reasons),
+                "reasons": reasons,
+                "contributions": contributions,
                 "job_id": job_id,
                 "assessed_at": now,
             }
@@ -159,19 +245,34 @@ def score_transactions(
                 }
             )
         by_category[result.category] += 1
+        outcome.assessed.append(
+            Assessed(
+                transaction=t,
+                assessment_id=assessment_id,
+                risk_score=result.risk_score,
+                risk_category=result.category,
+                force_alert=result.force_alert,
+                alertable=result.force_alert or result.risk_score >= spec.alert_threshold,
+            )
+        )
 
     for i in range(0, len(assessments), CHUNK):
         db.execute(insert(RiskAssessment), assessments[i : i + CHUNK])
     for i in range(0, len(hit_rows), CHUNK):
         db.execute(insert(RuleHitRow), hit_rows[i : i + CHUNK])
-    return {
+    outcome.summary = {
         "assessed": len(assessments),
         "rule_hits": len(hit_rows),
+        "explained": len(explanations),
+        "mode": "combined" if model is not None else "rules_only",
+        "model_version": registered.version if registered is not None else None,
         "rule_set_version": rule_set.version,
         "scoring_config_version": cfg.version,
+        "alertable": sum(a.alertable for a in outcome.assessed),
         "by_category": dict(sorted(by_category.items())),
         "hits_by_rule": dict(sorted(by_rule.items())),
     }
+    return outcome
 
 
 def batch_targets(db: Session, batch_id: uuid.UUID, *, rescore: bool) -> list[Transaction]:
@@ -179,20 +280,6 @@ def batch_targets(db: Session, batch_id: uuid.UUID, *, rescore: bool) -> list[Tr
     if not rescore:  # first scoring: skip anything already assessed (safe on retry)
         stmt = stmt.where(~exists().where(RiskAssessment.transaction_id == Transaction.id))
     return list(db.scalars(stmt.order_by(Transaction.occurred_at, Transaction.id)))
-
-
-def process_score_batch(
-    db: Session, payload: dict[str, Any], job_id: uuid.UUID | None = None
-) -> dict[str, Any]:
-    """Job handler for ``score_batch``. One transaction: all assessments or none."""
-    batch_id = uuid.UUID(str(payload["batch_id"]))
-    rescore = bool(payload.get("rescore", False))
-    targets = batch_targets(db, batch_id, rescore=rescore)
-    summary = score_transactions(db, targets, job_id=job_id)
-    summary["batch_id"] = str(batch_id)
-    summary["rescore"] = rescore
-    log.info("batch_scored", batch_id=str(batch_id), assessed=summary["assessed"])
-    return summary
 
 
 def enqueue_batch_scoring(
@@ -243,3 +330,70 @@ def assessments_for(db: Session, transaction_id: uuid.UUID) -> Sequence[RiskAsse
         .where(RiskAssessment.transaction_id == transaction_id)
         .order_by(RiskAssessment.assessed_at.desc(), RiskAssessment.id.desc())
     ).all()
+
+
+# ------------------------------------------------------------- scoring config
+
+_SCORING_LOCK = 0x53_45_4E_53_43_4F_52  # serialises config versions ("SENSCOR")
+
+
+def list_configs(db: Session) -> Sequence[ScoringConfig]:
+    return db.scalars(select(ScoringConfig).order_by(ScoringConfig.version.desc())).all()
+
+
+def _config_snapshot(cfg: ScoringConfig) -> dict[str, Any]:
+    return {
+        "version": cfg.version,
+        "w_rule": float(cfg.w_rule),
+        "w_model": float(cfg.w_model),
+        "rule_cap": cfg.rule_cap,
+        "bands": cfg.bands,
+        "alert_threshold": cfg.alert_threshold,
+    }
+
+
+def create_config(
+    db: Session, change: ScoringConfigChange, by: Principal, ctx: RequestContext
+) -> ScoringConfig:
+    """New active scoring configuration (the previous one is kept, inactive)."""
+    db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _SCORING_LOCK})
+    current = active_scoring_config(db)
+    if change.expected_version != current.version:
+        raise ConflictError(
+            "The scoring configuration changed. Reload and try again.",
+            code="stale_version",
+            details={"current_version": current.version},
+        )
+    latest = db.scalar(select(func.max(ScoringConfig.version))) or current.version
+    new = ScoringConfig(
+        version=latest + 1,
+        w_rule=round(change.w_rule, 3),
+        w_model=round(1 - round(change.w_rule, 3), 3),
+        rule_cap=change.rule_cap,
+        bands=[b.model_dump() for b in change.bands],
+        alert_threshold=change.alert_threshold,
+        is_active=True,
+        change_reason=change.change_reason,
+        created_by_id=by.id,
+    )
+    before, after = audit.diff(_config_snapshot(current), _config_snapshot(new))
+    if set(before) == {"version"}:
+        raise ValidationFailedError(
+            "The change does not modify the configuration", code="no_changes"
+        )
+    current.is_active = False
+    db.flush()  # one active config at a time (partial unique index)
+    db.add(new)
+    audit.record(
+        db,
+        actor=Actor(by.id, by.role.value),
+        ctx=ctx,
+        action="scoring_config.version_created",
+        entity_type="scoring_config",
+        entity_id=new.id,
+        before=before,
+        after={**after, "change_reason": change.change_reason},
+    )
+    db.commit()
+    db.refresh(new)
+    return new

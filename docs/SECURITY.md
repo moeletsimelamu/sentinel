@@ -1,6 +1,6 @@
 # Sentinel — Security
 
-> Status: Phase 6 (models). Updated as each phase adds attack surface; finalised in Phase 10.
+> Status: Phase 7 (scoring and alerts). Updated as each phase adds attack surface; finalised in Phase 10.
 > Sentinel is an educational simulation using synthetic data. It holds no real customer, card or banking data.
 
 ## Reporting
@@ -76,6 +76,18 @@ This is a portfolio project. Please report security issues privately to the repo
 | Immutable evaluation history | `model_evaluations` is append-only (trigger); at most one model can be `active` (partial unique index) | migration `0004` |
 | Audit | `model.registered` with version, family, hash and training dataset | `modules/models/service.py` |
 | No sensitive inputs | Model inputs exclude identifiers, labels, generator segment and protected attributes (tested in `ml` and backend) | `sentinel/features/model_input.py` |
+
+## Controls implemented (Phase 7 — scoring and alerts)
+
+| Area | Control | Where |
+|---|---|---|
+| Model loading | The artefact's SHA-256 must equal the hash **recorded at registration** (not just the manifest beside it), the feature schema must match and scikit-learn must be the training minor version — all checked before `joblib.load` | `sentinel/inference/loader.py` |
+| Model activation | Admin-only (`models:activate`), reason required, artefact must load and verify before the switch; one active model (partial unique index); audited with the previous version | `modules/models/service.py` |
+| Scoring configuration | Admin-only (`scoring:configure`), versioned, `expected_version` (409 if stale), validated weights and bands, audited before/after | `modules/scoring/service.py` |
+| Separation of duties | Admins configure and assign but cannot claim, review or close alerts; only the assignee can review/close; only lead analysts reopen; auditors read only | `modules/alerts/service.py`, permission matrix test |
+| No silent overwrites | Every alert mutation checks `version` (409 `stale_version`); illegal transitions return 409 `invalid_transition` | `modules/alerts/service.py` |
+| Tamper-evident history | `alert_events` and `alert_transactions` are append-only (trigger); notes cannot be edited — corrections reference the original note | migration `0005` |
+| Wording | Alerts are "flagged for review"; reasons and model explanations never say "fraud" (tested) | `sentinel/inference/labels.py` |
 
 ## Known limitations / planned work
 

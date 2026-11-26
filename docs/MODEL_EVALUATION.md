@@ -102,6 +102,20 @@ Dataset `full-1.0.0-42` (379,141 transactions, 0.75% injected fraud in 480 episo
 
 Coordinate search on validation recommended one change: `BEHAVIOUR_SHIFT.min_shift` 0.5 → 0.6. The log shows the deeper problem: at 0.6 the rule still fires on 30% of validation transactions, and at 0.9 (0.9% hit rate) recall at budget falls. The rule's design (comparing a few days' category mix with 90 days) carries almost no signal at any threshold; Phase 7 reviews whether to deactivate it rather than only re-tune it.
 
+### In-application check (Phase 7)
+
+The application was configured with the validated hybrid: random forest activated, scoring config v2 (`w_rule` 0.25, `w_model` 0.75, alert threshold 14, the hybrid's budget threshold on validation), and `BEHAVIOUR_SHIFT` v2 (`min_shift` 0.6). Re-scoring the separately generated **demo** dataset (`demo-1.0.0-42` — same generator, different seed, never used for training) through the worker gave:
+
+| | Value |
+|---|--:|
+| Alertable transactions | 864 (8.9 per 1,000) → 658 alerts after 24 h de-duplication |
+| Precision against injected fraud | 44.6% |
+| Recall of injected fraud | 59.0% (652 fraud transactions) |
+| Recall by typology | card testing 96%, mule pass-through 75%, night drain 75%, account takeover 53%, low-and-slow 45%, high-risk shift 43%, impossible travel 32% |
+| False positives that were benign travel | 56 of 478 |
+
+These are consistent with the offline test results for the hybrid (precision 52.5%, recall 62.5%), and impossible-travel recall is higher than the forest alone (12.5%) because the rule still forces alerts.
+
 ### Deviations from the protocol (§2)
 
 - **Calibration:** the validation period was split in time — calibrators fitted on the first half, sigmoid vs isotonic chosen by Brier score on the second half (isotonic won for both models); thresholds were then set on all of validation. Validation numbers are therefore slightly optimistic; test is unaffected.

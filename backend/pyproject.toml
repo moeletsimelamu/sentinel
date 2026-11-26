@@ -15,6 +15,12 @@ dependencies = [
     "pwdlib[argon2]>=0.4,<0.5",
     "pyjwt>=2.15,<3",
     "slowapi>=0.1.10,<0.2",
+    # Model inference. Pinned to the minor version that trained the artefacts:
+    # pickled estimators are only guaranteed to load on the same scikit-learn release.
+    "scikit-learn>=1.9,<1.10",
+    "joblib>=1.5,<2",
+    "numpy>=2.3,<3",
+    "pandas>=2.3,<3",
 ]
 
 [dependency-groups]
@@ -62,7 +68,7 @@ mypy_path = "src"
 packages = ["sentinel"]
 
 [[tool.mypy.overrides]]
-module = ["slowapi.*"]
+module = ["slowapi.*", "sklearn.*", "joblib.*", "pandas.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -100,9 +106,9 @@ source_modules = [
 forbidden_modules = ["sqlalchemy", "fastapi", "starlette", "sentinel.core.db"]
 
 [[tool.importlinter.contracts]]
-name = "Feature engineering and detection are pure (shared with ML training)"
+name = "Features, detection and inference are pure (shared with ML training)"
 type = "forbidden"
-source_modules = ["sentinel.features", "sentinel.detection"]
+source_modules = ["sentinel.features", "sentinel.detection", "sentinel.inference"]
 forbidden_modules = [
     "sqlalchemy",
     "fastapi",

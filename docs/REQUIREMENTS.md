@@ -88,6 +88,8 @@ NEW ──assign──▶ ASSIGNED ──start──▶ IN_REVIEW ──┬─�
 ```
 Resolution reasons: `false_positive_explained`, `legitimate_customer_behaviour`, `duplicate_alert`, `insufficient_information`, `escalated_to_case`.
 
+As implemented (Phase 7): analysts **claim** a new alert for themselves (`alerts:work`); admins and lead analysts **assign** to any analyst (`alerts:assign_others`, also allowed while assigned or in review). Only the assignee can start review and close; closing needs a reason and written findings. Only a lead analyst (`alerts:work` + `alerts:assign_others`) can reopen a closed alert, which returns it to NEW and unassigned. `escalated_to_case` is not a close reason: ESCALATED is entered by opening a case from the alert (Phase 8). Illegal transitions return 409 `invalid_transition`; acting on a stale `version` returns 409 `stale_version`.
+
 ### 5.3 Case lifecycle
 
 ```

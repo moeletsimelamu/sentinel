@@ -7,6 +7,7 @@ from sqlalchemy import engine_from_config, pool
 
 from sentinel.core.config import get_settings
 from sentinel.core.db import Base
+from sentinel.modules.alerts import models as _alert_models  # noqa: F401
 from sentinel.modules.audit import models as _audit_models  # noqa: F401 — register tables
 from sentinel.modules.auth import models as _auth_models  # noqa: F401
 from sentinel.modules.ingestion import models as _ingestion_models  # noqa: F401

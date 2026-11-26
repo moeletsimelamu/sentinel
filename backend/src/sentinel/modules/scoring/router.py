@@ -17,16 +17,19 @@ from sentinel.modules.scoring.schemas import (
     AssessmentOut,
     DetectionRunOut,
     DetectionRunRequest,
+    ScoringConfigChange,
     ScoringConfigOut,
 )
 
 detection_router = APIRouter(prefix="/detection", tags=["detection"])
 assessments_router = APIRouter(prefix="/transactions", tags=["detection"])
 scoring_config_router = APIRouter(prefix="/scoring-config", tags=["detection"])
+scoring_configs_router = APIRouter(prefix="/scoring-configs", tags=["detection"])
 
 _run = RequirePermission(Permission.DETECTION_RUN)
 _read_txn = RequirePermission(Permission.TRANSACTIONS_READ)
 _read_rules = RequirePermission(Permission.RULES_READ)
+_configure = RequirePermission(Permission.SCORING_CONFIGURE)
 
 
 def _run_out(job: ProcessingJob) -> DetectionRunOut:
@@ -80,3 +83,23 @@ def list_assessments(
 @scoring_config_router.get("", response_model=ScoringConfigOut, dependencies=[Depends(_read_rules)])
 def get_scoring_config(db: Session = Depends(get_db)) -> ScoringConfigOut:
     return ScoringConfigOut.model_validate(service.active_scoring_config(db))
+
+
+@scoring_configs_router.get(
+    "", response_model=list[ScoringConfigOut], dependencies=[Depends(_read_rules)]
+)
+def list_scoring_configs(db: Session = Depends(get_db)) -> list[ScoringConfigOut]:
+    return [ScoringConfigOut.model_validate(c) for c in service.list_configs(db)]
+
+
+@scoring_configs_router.post(
+    "", response_model=ScoringConfigOut, status_code=status.HTTP_201_CREATED
+)
+def create_scoring_config(
+    body: ScoringConfigChange,
+    by: Principal = Depends(_configure),
+    db: Session = Depends(get_db),
+    ctx: RequestContext = Depends(get_request_context),
+) -> ScoringConfigOut:
+    """New active configuration (weights, rule cap, bands, alert threshold). Audited."""
+    return ScoringConfigOut.model_validate(service.create_config(db, body, by, ctx))

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 
 class RuleHitOut(BaseModel):
@@ -39,6 +39,7 @@ class AssessmentOut(BaseModel):
     feature_set_version: str
     features: dict[str, Any]
     reasons: list[str]
+    contributions: dict[str, Any] | None = None
     hits: list[RuleHitOut]
     assessed_at: datetime
 
@@ -74,3 +75,34 @@ class ScoringConfigOut(BaseModel):
     is_active: bool
     change_reason: str
     created_at: datetime
+
+
+class Band(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Annotated[str, StringConstraints(pattern=r"^[a-z]{2,16}$")]
+    min_score: int = Field(ge=0, le=100)
+
+
+class ScoringConfigChange(BaseModel):
+    """A new scoring configuration. ``w_model`` is derived as ``1 - w_rule``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+    w_rule: float = Field(ge=0, le=1)
+    rule_cap: int = Field(ge=1, le=100)
+    bands: list[Band] = Field(min_length=2, max_length=6)
+    alert_threshold: int = Field(ge=1, le=100)
+    change_reason: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=10, max_length=500)
+    ]
+
+    @model_validator(mode="after")
+    def _bands_valid(self) -> ScoringConfigChange:
+        mins = [b.min_score for b in self.bands]
+        if mins[0] != 0 or mins != sorted(set(mins)):
+            raise ValueError("bands must start at 0 and strictly increase")
+        if len({b.name for b in self.bands}) != len(self.bands):
+            raise ValueError("band names must be unique")
+        return self

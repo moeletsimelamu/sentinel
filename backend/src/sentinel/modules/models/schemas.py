@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, StringConstraints
 
 
 class EvaluationOut(BaseModel):
@@ -47,3 +47,9 @@ class ModelDetail(ModelSummary):
     recommended_scoring: dict[str, Any] | None
     recommended_rule_changes: dict[str, Any] | None
     evaluations: list[EvaluationOut]
+
+
+class ActivationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=10, max_length=500)]

@@ -11,18 +11,26 @@ import hashlib
 import json
 import uuid
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from sentinel.core.config import Settings
-from sentinel.core.errors import NotFoundError, ValidationFailedError
+from sentinel.core.errors import ConflictError, NotFoundError, ValidationFailedError
 from sentinel.features import FEATURE_SCHEMA_HASH, MODEL_FEATURES
+from sentinel.inference import ModelLoadError, load_model
 from sentinel.modules.audit import service as audit
 from sentinel.modules.audit.context import Actor, RequestContext
-from sentinel.modules.models.models import ModelEvaluation, ModelFamily, ModelVersion
+from sentinel.modules.auth.schemas import Principal
+from sentinel.modules.models.models import (
+    ModelEvaluation,
+    ModelFamily,
+    ModelStatus,
+    ModelVersion,
+)
 
 MAX_MANIFEST_BYTES = 5 * 1024 * 1024
 SPLITS = ("validation", "test", "holdout")
@@ -175,3 +183,83 @@ def require_folder(settings: Settings, name: str) -> Path:  # pragma: no cover -
     if not folder.is_dir():
         raise ValidationFailedError("Model folder not found")
     return folder
+
+
+_ACTIVATION_LOCK = 0x53_45_4E_4D_4F_44_4C  # one activation at a time ("SENMODL")
+
+
+def active(db: Session) -> ModelVersion | None:
+    return db.scalar(select(ModelVersion).where(ModelVersion.status == ModelStatus.ACTIVE))
+
+
+def activate(
+    db: Session,
+    settings: Settings,
+    model_id: uuid.UUID,
+    reason: str,
+    by: Principal,
+    ctx: RequestContext,
+) -> ModelVersion:
+    """Make ``model_id`` the model used for scoring. The artefact must load and verify."""
+    db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _ACTIVATION_LOCK})
+    model = get_model(db, model_id)
+    if model.family == ModelFamily.RULES_BASELINE or not model.artefact_path:
+        raise ValidationFailedError(
+            "The rule baseline has no model to activate", code="not_activatable"
+        )
+    if model.status == ModelStatus.ACTIVE:
+        raise ConflictError("This model is already active", code="already_active")
+    try:
+        load_model(
+            (settings.models_dir / model.artefact_path).parent,
+            expected_sha256=model.artefact_sha256 or "",
+            version=model.version,
+        )
+    except ModelLoadError as exc:
+        raise ValidationFailedError(
+            f"Model cannot be loaded: {exc}", code="model_unloadable"
+        ) from None
+    previous = active(db)
+    if previous is not None:
+        previous.status = ModelStatus.REGISTERED
+        db.flush()  # at most one active model (partial unique index)
+    model.status = ModelStatus.ACTIVE
+    model.activated_by_id = by.id
+    model.activated_at = datetime.now(UTC)
+    audit.record(
+        db,
+        actor=Actor(by.id, by.role.value),
+        ctx=ctx,
+        action="model.activated",
+        entity_type="model_version",
+        entity_id=model.id,
+        before={"active_version": previous.version if previous else None},
+        after={"active_version": model.version, "reason": reason},
+    )
+    db.commit()
+    db.refresh(model)
+    return model
+
+
+def deactivate(
+    db: Session, model_id: uuid.UUID, reason: str, by: Principal, ctx: RequestContext
+) -> ModelVersion:
+    """Return to rules-only scoring."""
+    db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _ACTIVATION_LOCK})
+    model = get_model(db, model_id)
+    if model.status != ModelStatus.ACTIVE:
+        raise ConflictError("This model is not active", code="not_active")
+    model.status = ModelStatus.REGISTERED
+    audit.record(
+        db,
+        actor=Actor(by.id, by.role.value),
+        ctx=ctx,
+        action="model.deactivated",
+        entity_type="model_version",
+        entity_id=model.id,
+        before={"active_version": model.version},
+        after={"active_version": None, "reason": reason},
+    )
+    db.commit()
+    db.refresh(model)
+    return model
